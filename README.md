@@ -48,7 +48,7 @@ go build -o clashtui .
 
 ## 系统要求
 
-- Linux (GNOME桌面)
+- Linux (支持 sway/wayland/GNOME 等桌面)
 - Go 1.21+
 
 ## License
