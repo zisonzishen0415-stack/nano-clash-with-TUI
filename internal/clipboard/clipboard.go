@@ -7,13 +7,27 @@ import (
 )
 
 func Read() (string, error) {
+	// Try Wayland first (wl-copy/wl-paste)
+	if content, err := tryWlPaste(); err == nil {
+		return content, nil
+	}
+	// Try X11 tools
 	if content, err := tryXclip(); err == nil {
 		return content, nil
 	}
 	if content, err := tryXsel(); err == nil {
 		return content, nil
 	}
-	return "", errors.New("no clipboard tool available (install xclip or xsel)")
+	return "", errors.New("no clipboard tool available (install wl-clipboard for Wayland, or xclip/xsel for X11)")
+}
+
+func tryWlPaste() (string, error) {
+	cmd := exec.Command("wl-paste", "--no-newline")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func tryXclip() (string, error) {

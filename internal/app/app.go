@@ -29,13 +29,17 @@ func New() Model {
 	core := clash.NewCore()
 	nodes := tui.NewNodesModel(client)
 	logs := tui.NewLogsModel()
-	
+
+	// Check if clash is already running
+	running := client.IsConnected()
+
 	return Model{
-		tab:    0,
-		nodes:  nodes,
-		logs:   logs,
-		core:   core,
-		client: client,
+		tab:     0,
+		nodes:   nodes,
+		logs:    logs,
+		core:    core,
+		client:  client,
+		running: running,
 	}
 }
 
@@ -44,13 +48,12 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 处理订阅输入模式
 	if m.subInput {
 		return m.handleSubInput(msg)
 	}
 
 	switch msg := msg.(type) {
-	case tui.MsgProxiesLoaded, tui.MsgProxySwitched, tui.MsgDelayTested:
+	case tui.MsgProxiesLoaded, tui.MsgProxySwitched, tui.MsgDelayTested, tui.MsgRetryLoad, tui.MsgTestProgress:
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
@@ -66,7 +69,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		k := msg.String()
 
-		// 切换标签: 1/2/3 或 h/l 或 left/right
 		switch k {
 		case "h", "left":
 			if m.tab > 0 {
@@ -89,39 +91,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// 全局按键
 		switch k {
 		case "x":
 			m.core.Stop()
 			proxy.UnsetSystemProxy()
 			m.running = false
 			return m, func() tea.Msg { return tui.MsgLogLine("Stopped core, proxy disabled") }
+		case "s":
+			m.subInput = true
+			m.subURL = ""
+			return m, nil
+		case "c":
+			return m, m.importFromClipboard()
+		case "r":
+			return m, m.toggleCore()
+		case "q", "ctrl+c":
+			return m, tea.Quit
 		}
 
-		// Nodes 标签页的按键
 		if m.tab == 0 {
 			cmd := m.nodes.Update(msg)
 			return m, cmd
-		}
-
-		// Config 标签页按键
-		if m.tab == 1 {
-			switch k {
-			case "s":
-				m.subInput = true
-				m.subURL = ""
-				return m, nil
-			case "c":
-				return m, m.importFromClipboard()
-			case "r":
-				return m, m.toggleCore()
-			}
-		}
-
-		// 全局
-		switch k {
-		case "q", "ctrl+c":
-			return m, tea.Quit
 		}
 	}
 
@@ -159,7 +149,6 @@ func (m Model) handleSubInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	// 标签栏
 	tabs := ""
 	tabNames := []string{"Nodes", "Config", "Logs"}
 	for i, name := range tabNames {
@@ -171,13 +160,12 @@ func (m Model) View() string {
 		tabs += " "
 	}
 
-	// 内容
 	var content string
 	switch m.tab {
 	case 0:
 		content = m.nodes.View()
 		if content == "" {
-			content = "  No proxies loaded.\n\n  Press 2/l → Config tab, then 'c' to import from clipboard"
+			content = "  No proxies loaded.\n\n  Press 2/l -> Config tab, then 'c' to import from clipboard"
 		}
 	case 1:
 		content = m.configView()
@@ -185,12 +173,10 @@ func (m Model) View() string {
 		content = m.logs.View()
 	}
 
-	// 输入模式
 	if m.subInput {
 		content = fmt.Sprintf("\n  Enter subscription URL:\n  > %s\n\n  enter: submit | esc: cancel", m.subURL)
 	}
 
-	// 状态栏
 	status := fmt.Sprintf("\n\n  Core: %s | Current: %s",
 		m.coreStatus(), m.nodes.GetCurrent())
 
@@ -314,7 +300,6 @@ func (m Model) downloadSub(url string) tea.Cmd {
 
 		m.logs.AddLine("Subscription saved")
 
-		// 检查内核
 		if !m.core.IsInstalled() {
 			m.logs.AddLine("Installing core...")
 			m.core.Install()

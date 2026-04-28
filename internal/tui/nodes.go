@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"clashtui/internal/clash"
 
@@ -17,6 +18,7 @@ type NodesModel struct {
 	client   *clash.Client
 	testing  bool
 	testIdx  int
+	retries  int
 }
 
 type MsgProxiesLoaded []clash.ProxyInfo
@@ -26,6 +28,7 @@ type MsgDelayTested struct {
 	Delay int
 }
 type MsgRefresh struct{}
+type MsgRetryLoad struct{}
 type MsgTestProgress struct {
 	Index int
 	Total int
@@ -33,7 +36,7 @@ type MsgTestProgress struct {
 type MsgStopCore struct{}
 
 func NewNodesModel(client *clash.Client) NodesModel {
-	return NodesModel{client: client, loading: true, testing: false}
+	return NodesModel{client: client, loading: true, testing: false, retries: 0}
 }
 
 func (m NodesModel) Init() tea.Cmd {
@@ -45,23 +48,17 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 	case MsgProxiesLoaded:
 		m.proxies = msg
 		m.loading = false
+		m.retries = 0
 		if len(m.proxies) > 0 {
 			if m.selected >= len(m.proxies) {
 				m.selected = 0
 			}
-var b strings.Builder
-
-	if m.testing {
-		b.WriteString(fmt.Sprintf("  Testing: %d/%d\n\n", m.testIdx+1, len(m.proxies)))
-	}
-
-	for i, p := range m.proxies {
+			for i, p := range m.proxies {
 				if p.Name == m.current {
 					m.selected = i
 					break
 				}
 			}
-			// 自动开始延迟测试
 			m.testing = true
 			m.testIdx = 0
 			return tea.Sequence(
@@ -69,6 +66,16 @@ var b strings.Builder
 				m.testDelay(0),
 			)
 		}
+		return nil
+
+	case MsgRetryLoad:
+		m.retries++
+		if m.retries < 10 {
+			return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+				return MsgRefresh{}
+			})
+		}
+		m.loading = false
 		return nil
 
 	case MsgProxySwitched:
@@ -153,7 +160,7 @@ func (m NodesModel) View() string {
 	}
 
 	if len(m.proxies) == 0 {
-		return "  No proxies loaded."
+		return "  No proxies loaded. Press 'r' to refresh."
 	}
 
 	maxShow := 12
@@ -165,19 +172,21 @@ func (m NodesModel) View() string {
 	if end > len(m.proxies) {
 		end = len(m.proxies)
 		start = end - maxShow
-		if start < 0 { start = 0 }
+		if start < 0 {
+			start = 0
+		}
 	}
 
 	for i := start; i < end; i++ {
 		p := m.proxies[i]
 		prefix := "  "
 		if i == m.selected {
-			prefix = "▶ "
+			prefix = "> "
 		}
 
-		status := "●"
+		status := "*"
 		if !p.Alive {
-			status = "○"
+			status = "o"
 		}
 
 		delay := fmt.Sprintf("%dms", p.Delay)
@@ -193,7 +202,7 @@ func (m NodesModel) View() string {
 		b.WriteString(fmt.Sprintf("%s%s %s%s | %s\n", prefix, status, p.Name, curr, delay))
 	}
 
-	b.WriteString("\n  j/k: select | enter: switch | t: test | T: test all | x: stop (global)")
+	b.WriteString("\n  j/k: select | enter: switch | t: test | T: test all")
 	return b.String()
 }
 
@@ -201,19 +210,13 @@ func (m NodesModel) loadProxies() tea.Msg {
 	if m.client == nil {
 		return MsgProxiesLoaded{}
 	}
-	proxies, _ := m.client.GetAllProxies()
+	proxies, err := m.client.GetAllProxies()
+	if err != nil || len(proxies) == 0 {
+		return MsgRetryLoad{}
+	}
 	current, _ := m.client.GetCurrentProxy()
 	m.current = current
 	return MsgProxiesLoaded(proxies)
-}
-
-func (m NodesModel) switchProxy(name string) tea.Cmd {
-	return func() tea.Msg {
-		if m.client != nil {
-			m.client.SwitchProxy(name)
-		}
-		return MsgProxySwitched(name)
-	}
 }
 
 func (m NodesModel) testDelay(idx int) tea.Cmd {
@@ -224,22 +227,6 @@ func (m NodesModel) testDelay(idx int) tea.Cmd {
 		}
 		return MsgDelayTested{Index: idx, Delay: 0}
 	}
-}
-
-func (m NodesModel) testAllDelays() tea.Cmd {
-	if len(m.proxies) == 0 {
-		return nil
-	}
-	cmds := make([]tea.Cmd, len(m.proxies))
-	for i := range m.proxies {
-		name := m.proxies[i].Name
-		idx := i
-		cmds[i] = func() tea.Msg {
-			delay, _ := m.client.TestDelay(name)
-			return MsgDelayTested{Index: idx, Delay: delay}
-		}
-	}
-	return tea.Batch(cmds...)
 }
 
 func (m NodesModel) GetCurrent() string {

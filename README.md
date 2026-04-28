@@ -35,9 +35,33 @@
 # 编译
 go build -o clashtui .
 
-# 运行
+# 运行 TUI
 ./clashtui
 ```
+
+## Waybar 集成
+
+支持在 Waybar 状态栏显示代理状态：
+
+```json
+"custom/clashtui": {
+  "exec": "clashtui --status",
+  "on-click": "clashtui",
+  "on-click-right": "clashtui --toggle",
+  "interval": 5
+}
+```
+
+详见 [docs/waybar.md](docs/waybar.md)
+
+## 命令行
+
+| 命令 | 功能 |
+|------|------|
+| `clashtui` | 打开 TUI 界面 |
+| `clashtui --status` | 输出状态 JSON |
+| `clashtui --toggle` | 快速开关代理 |
+| `clashtui --stop` | 停止代理 |
 
 ## 使用
 
@@ -50,6 +74,12 @@ go build -o clashtui .
 
 - Linux (支持 Wayland/X11)
 - Go 1.21+
+- TUN模式需要: `sudo setcap cap_net_admin+ep ~/.config/clashTUI/core/clash`
+
+## Clipboard支持
+
+- Wayland: 安装 `wl-clipboard`
+- X11: 安装 `xclip` 或 `xsel`
 
 ## License
 

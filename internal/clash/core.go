@@ -10,15 +10,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"clashtui/internal/config"
 )
 
-const coreDownloadURL = "https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/download/v1.18.10/mihomo-linux-amd64-v1.18.10.gz"
+const coreVersion = "v1.18.10"
 const mmdbDownloadURL = "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
 const geositeDownloadURL = "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+
+func getCoreDownloadURL() string {
+	arch := runtime.GOARCH
+	if arch == "arm64" || arch == "arm" {
+		arch = "arm64"
+	} else {
+		arch = "amd64"
+	}
+	return fmt.Sprintf("https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-linux-%s-%s.gz", coreVersion, arch, coreVersion)
+}
 
 type Core struct{}
 
@@ -32,14 +43,25 @@ func (c *Core) IsInstalled() bool {
 func (c *Core) Install() error {
 	if c.IsInstalled() { return nil }
 	config.EnsureCoreDir()
-	
+
 	tmp := filepath.Join(config.GetBaseDir(), "mihomo.gz")
-	if err := downloadFile(coreDownloadURL, tmp); err != nil { return err }
-	
+	if err := downloadFile(getCoreDownloadURL(), tmp); err != nil { return err }
+
 	if err := ungzip(tmp, config.CoreBinaryPath()); err != nil { return err }
 	os.Remove(tmp)
 	os.Chmod(config.CoreBinaryPath(), 0755)
 	return nil
+}
+
+func (c *Core) NeedsCapability() bool {
+	cmd := exec.Command("getcap", config.CoreBinaryPath())
+	output, _ := cmd.Output()
+	return !strings.Contains(string(output), "cap_net_admin")
+}
+
+func (c *Core) SetCapability() error {
+	cmd := exec.Command("sudo", "setcap", "cap_net_admin+ep", config.CoreBinaryPath())
+	return cmd.Run()
 }
 
 func (c *Core) DownloadGeoData() error {
@@ -57,13 +79,25 @@ func (c *Core) DownloadGeoData() error {
 
 func (c *Core) Start() error {
 	cmd := exec.Command(config.CoreBinaryPath(), "-d", config.GetBaseDir())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Discard output to avoid mixing with status output
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	return cmd.Start()
 }
 
 func (c *Core) Stop() error {
+	// Kill mihomo/clash process but not clashtui itself
+	// Use pgrep to find mihomo process specifically
+	exec.Command("pkill", "-f", "mihomo").Run()
 	exec.Command("pkill", "-f", "clash -d "+config.GetBaseDir()).Run()
+
+	// Wait a moment for cleanup
+	time.Sleep(500 * time.Millisecond)
+
+	// Force kill if still running
+	exec.Command("pkill", "-9", "-f", "mihomo").Run()
+	exec.Command("pkill", "-9", "-f", "clash -d "+config.GetBaseDir()).Run()
+
 	return nil
 }
 
@@ -130,7 +164,8 @@ func DownloadSubscription(subURL string) ([]byte, error) {
 
 func buildConfig(nodes []string) string {
 	var b strings.Builder
-	b.WriteString("mixed-port: 7890\nallow-lan: true\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\n\nproxies:\n")
+	b.WriteString("mixed-port: 7890\nallow-lan: true\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\n")
+	b.WriteString("\nproxies:\n")
 	for i, n := range nodes { b.WriteString(parseNode(n, i)) }
 	b.WriteString("\nproxy-groups:\n  - name: Auto\n    type: url-test\n    proxies:\n")
 	for i := range nodes { b.WriteString(fmt.Sprintf("      - Node%d\n", i+1)) }
