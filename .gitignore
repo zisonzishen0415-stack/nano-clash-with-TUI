@@ -1,0 +1,14 @@
+# Binary
+clashtui
+gen
+
+# Config
+*.yaml
+*.db
+*.mmdb
+*.dat
+
+# Temp
+*.log
+*.gz
+tmp/

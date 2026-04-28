@@ -21,6 +21,8 @@ type ProxyDetail struct {
 	Name    string        `json:"name"`
 	Type    string        `json:"type"`
 	Alive   bool          `json:"alive"`
+	Now     string        `json:"now"`
+	All     []string      `json:"all"`
 	History []DelayHistory `json:"history"`
 }
 
@@ -60,7 +62,7 @@ func (c *Client) GetAllProxies() ([]ProxyInfo, error) {
 }
 
 func (c *Client) GetCurrentProxy() (string, error) {
-	data, err := c.Get("/proxies/GLOBAL")
+	data, err := c.Get("/proxies/Auto")
 	if err != nil {
 		return "", err
 	}
@@ -70,11 +72,11 @@ func (c *Client) GetCurrentProxy() (string, error) {
 		return "", err
 	}
 
-	return detail.Name, nil
+	return detail.Now, nil
 }
 
 func (c *Client) SwitchProxy(name string) error {
-	return c.Put("/proxies/GLOBAL", map[string]string{"name": name})
+	return c.Put("/proxies/Auto", map[string]string{"name": name})
 }
 
 func (c *Client) TestDelay(name string) (int, error) {

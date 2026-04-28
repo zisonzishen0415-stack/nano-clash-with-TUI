@@ -10,145 +10,219 @@ import (
 )
 
 type NodesModel struct {
-	proxies    []clash.ProxyInfo
-	selected   int
-	current    string
-	loading    bool
-	testing    bool
-	client     *clash.Client
-	width      int
-	height     int
+	proxies  []clash.ProxyInfo
+	selected int
+	current  string
+	loading  bool
+	client   *clash.Client
+	testing  bool
+	testIdx  int
 }
 
-type proxiesLoadedMsg []clash.ProxyInfo
-type proxySwitchedMsg string
-type delayTestedMsg struct {
-	index int
-	delay int
+type MsgProxiesLoaded []clash.ProxyInfo
+type MsgProxySwitched string
+type MsgDelayTested struct {
+	Index int
+	Delay int
 }
+type MsgRefresh struct{}
+type MsgTestProgress struct {
+	Index int
+	Total int
+}
+type MsgStopCore struct{}
 
 func NewNodesModel(client *clash.Client) NodesModel {
-	return NodesModel{client: client, loading: true}
+	return NodesModel{client: client, loading: true, testing: false}
 }
 
 func (m NodesModel) Init() tea.Cmd {
-	return m.LoadProxies
+	return m.loadProxies
 }
 
-func (m NodesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
-	case proxiesLoadedMsg:
+	case MsgProxiesLoaded:
 		m.proxies = msg
 		m.loading = false
-		if len(m.proxies) > 0 && m.selected >= len(m.proxies) {
-			m.selected = 0
-		}
+		if len(m.proxies) > 0 {
+			if m.selected >= len(m.proxies) {
+				m.selected = 0
+			}
+var b strings.Builder
 
-	case proxySwitchedMsg:
+	if m.testing {
+		b.WriteString(fmt.Sprintf("  Testing: %d/%d\n\n", m.testIdx+1, len(m.proxies)))
+	}
+
+	for i, p := range m.proxies {
+				if p.Name == m.current {
+					m.selected = i
+					break
+				}
+			}
+			// 自动开始延迟测试
+			m.testing = true
+			m.testIdx = 0
+			return tea.Sequence(
+				func() tea.Msg { return MsgTestProgress{Index: 0, Total: len(m.proxies)} },
+				m.testDelay(0),
+			)
+		}
+		return nil
+
+	case MsgProxySwitched:
 		m.current = string(msg)
-
-	case delayTestedMsg:
-		if msg.index < len(m.proxies) {
-			m.proxies[msg.index].Delay = msg.delay
+		if m.client != nil {
+			m.client.SwitchProxy(m.current)
 		}
+		return nil
+
+	case MsgTestProgress:
+		m.testing = true
+		m.testIdx = msg.Index
+		return nil
+
+	case MsgDelayTested:
+		if msg.Index < len(m.proxies) {
+			m.proxies[msg.Index].Delay = msg.Delay
+		}
+		if m.testing && msg.Index < len(m.proxies)-1 {
+			return tea.Sequence(
+				func() tea.Msg { return MsgTestProgress{Index: msg.Index + 1, Total: len(m.proxies)} },
+				m.testDelay(msg.Index+1),
+			)
+		}
+		m.testing = false
+		return nil
+
+	case MsgRefresh:
+		m.loading = true
+		return m.loadProxies
 
 	case tea.KeyMsg:
-		switch msg.String() {
+		k := msg.String()
+		switch k {
 		case "j", "down":
-			if m.selected < len(m.proxies)-1 {
+			if len(m.proxies) > 0 && m.selected < len(m.proxies)-1 {
 				m.selected++
 			}
 		case "k", "up":
-			if m.selected > 0 {
+			if len(m.proxies) > 0 && m.selected > 0 {
 				m.selected--
 			}
 		case "enter":
 			if len(m.proxies) > 0 {
 				name := m.proxies[m.selected].Name
-				return m, m.switchProxy(name)
+				m.current = name
+				if m.client != nil {
+					m.client.SwitchProxy(name)
+				}
+				return func() tea.Msg { return MsgProxySwitched(name) }
 			}
-		case "r":
+		case "x":
+			return func() tea.Msg { return MsgStopCore{} }
+		case "t":
 			if len(m.proxies) > 0 {
-				return m, m.testSingleDelay(m.selected)
+				return m.testDelay(m.selected)
 			}
-		case "R":
-			return m, m.testAllDelays()
+		case "T":
+			if len(m.proxies) > 0 && !m.testing {
+				m.testing = true
+				m.testIdx = 0
+				return tea.Sequence(
+					func() tea.Msg { return MsgTestProgress{Index: 0, Total: len(m.proxies)} },
+					m.testDelay(0),
+				)
+			}
 		}
 	}
 
-	return m, nil
+	return nil
 }
 
 func (m NodesModel) View() string {
-	if m.loading {
-		return "\n  Loading proxies..."
-	}
-
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Nodes") + "\n\n")
 
-	for i, p := range m.proxies {
-		style := nodeStyle
-		if i == m.selected {
-			style = selectedStyle
-		}
-		if p.Name == m.current {
-			style = currentStyle
-		}
-
-		aliveStr := aliveStyle.Render("●")
-		if !p.Alive {
-			aliveStr = deadStyle.Render("●")
-		}
-
-		delayStr := fmt.Sprintf("%dms", p.Delay)
-		if p.Delay == 0 {
-			delayStr = "-"
-		}
-
-		line := fmt.Sprintf("  %s %s | %s", aliveStr, p.Name, delayStr)
-		b.WriteString(style.Render(line) + "\n")
+	if m.testing {
+		b.WriteString(fmt.Sprintf("  Testing: %d/%d\n\n", m.testIdx+1, len(m.proxies)))
 	}
 
-	b.WriteString("\n" + helpStyle.Render("j/k: select | Enter: switch | r: test | R: test all"))
+	if m.loading {
+		return "  Loading proxies..."
+	}
 
+	if len(m.proxies) == 0 {
+		return "  No proxies loaded."
+	}
+
+	maxShow := 12
+	start := 0
+	if m.selected > maxShow/2 {
+		start = m.selected - maxShow/2
+	}
+	end := start + maxShow
+	if end > len(m.proxies) {
+		end = len(m.proxies)
+		start = end - maxShow
+		if start < 0 { start = 0 }
+	}
+
+	for i := start; i < end; i++ {
+		p := m.proxies[i]
+		prefix := "  "
+		if i == m.selected {
+			prefix = "▶ "
+		}
+
+		status := "●"
+		if !p.Alive {
+			status = "○"
+		}
+
+		delay := fmt.Sprintf("%dms", p.Delay)
+		if p.Delay == 0 {
+			delay = "-"
+		}
+
+		curr := ""
+		if p.Name == m.current {
+			curr = " [current]"
+		}
+
+		b.WriteString(fmt.Sprintf("%s%s %s%s | %s\n", prefix, status, p.Name, curr, delay))
+	}
+
+	b.WriteString("\n  j/k: select | enter: switch | t: test | T: test all | x: stop (global)")
 	return b.String()
 }
 
-func (m NodesModel) GetCurrent() string {
-	return m.current
-}
-
-func (m NodesModel) LoadProxies() tea.Msg {
-	proxies, err := m.client.GetAllProxies()
-	if err != nil {
-		return proxiesLoadedMsg{}
+func (m NodesModel) loadProxies() tea.Msg {
+	if m.client == nil {
+		return MsgProxiesLoaded{}
 	}
+	proxies, _ := m.client.GetAllProxies()
 	current, _ := m.client.GetCurrentProxy()
 	m.current = current
-	return proxiesLoadedMsg(proxies)
+	return MsgProxiesLoaded(proxies)
 }
 
 func (m NodesModel) switchProxy(name string) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.client.SwitchProxy(name); err != nil {
-			return proxySwitchedMsg(m.current)
+		if m.client != nil {
+			m.client.SwitchProxy(name)
 		}
-		return proxySwitchedMsg(name)
+		return MsgProxySwitched(name)
 	}
 }
 
-func (m NodesModel) testSingleDelay(index int) tea.Cmd {
+func (m NodesModel) testDelay(idx int) tea.Cmd {
 	return func() tea.Msg {
-		if index >= len(m.proxies) {
-			return delayTestedMsg{index: index, delay: 0}
+		if idx < len(m.proxies) && m.client != nil {
+			delay, _ := m.client.TestDelay(m.proxies[idx].Name)
+			return MsgDelayTested{Index: idx, Delay: delay}
 		}
-		delay, _ := m.client.TestDelay(m.proxies[index].Name)
-		return delayTestedMsg{index: index, delay: delay}
+		return MsgDelayTested{Index: idx, Delay: 0}
 	}
 }
 
@@ -156,17 +230,18 @@ func (m NodesModel) testAllDelays() tea.Cmd {
 	if len(m.proxies) == 0 {
 		return nil
 	}
-	m.testing = true
-
 	cmds := make([]tea.Cmd, len(m.proxies))
 	for i := range m.proxies {
 		name := m.proxies[i].Name
 		idx := i
 		cmds[i] = func() tea.Msg {
 			delay, _ := m.client.TestDelay(name)
-			return delayTestedMsg{index: idx, delay: delay}
+			return MsgDelayTested{Index: idx, Delay: delay}
 		}
 	}
-
 	return tea.Batch(cmds...)
+}
+
+func (m NodesModel) GetCurrent() string {
+	return m.current
 }

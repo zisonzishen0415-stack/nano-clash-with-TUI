@@ -44,6 +44,10 @@ func ConfigExists() bool {
 	return err == nil
 }
 
+func Exists() bool {
+	return ConfigExists()
+}
+
 func SaveSubscription(url string) error {
 	if err := EnsureDir(); err != nil {
 		return err
