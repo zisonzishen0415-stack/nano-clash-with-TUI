@@ -152,23 +152,17 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 			return m.proxies[i].Delay < m.proxies[j].Delay
 		})
 
-		if m.initialLoad && m.autoSelectBest && len(m.proxies) > 0 {
-			for _, p := range m.proxies {
-				if p.Delay > 0 {
-					m.current = p.Name
-					m.client.SwitchProxy(p.Name)
-					for i, proxy := range m.proxies {
-						if proxy.Name == p.Name {
-							m.selected = i
-							break
-						}
-					}
-					break
-				}
+		// 统计测试结果并发送完成日志
+		successCount := 0
+		for _, p := range m.proxies {
+			if p.Delay > 0 {
+				successCount++
 			}
 		}
-		m.initialLoad = false
-		return nil
+		return func() tea.Msg {
+			return MsgLogLine(fmt.Sprintf("✓ Tested %d/%d nodes, sorted by speed", successCount, len(m.proxies)))
+		}
+
 
 	case MsgRefresh:
 		m.loading = true
