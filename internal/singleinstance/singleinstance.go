@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-const pidFile = "/tmp/clashTUI.pid"
+const pidFile = "/tmp/clashtui.pid"
 
 func Acquire() (bool, error) {
 	pid, err := readPID()

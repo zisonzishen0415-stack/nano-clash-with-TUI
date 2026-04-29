@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 )
 
-const ConfigDir = ".config/clashTUI"
+const ConfigDir = ".config/clashtui"
 const ConfigFile = "config.yaml"
 const SubscriptionFile = "subscriptions.txt"
 const CoreDir = "core"

@@ -27,14 +27,14 @@ ClashTUI is a terminal UI for managing Clash/mihomo proxy. Uses BubbleTea framew
   - `core.go` - Process management (download, start/stop mihomo binary, geo data)
   - `client.go` - REST API client for Clash external controller (127.0.0.1:9090)
   - `proxy.go` - ProxyInfo type and API methods (GetAllProxies, SwitchProxy, TestDelay)
-- `internal/config/config.go` - File paths (~/.config/clashTUI/), config/subscription persistence
+- `internal/config/config.go` - File paths (~/.config/clashtui/), config/subscription persistence
 - `internal/proxy/proxy.go` - System proxy via environment variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
 - `internal/clipboard/clipboard.go` - Clipboard read via wl-paste (Wayland) or xclip/xsel (X11)
 - `internal/tui/` - BubbleTea components:
   - `nodes.go` - Proxy list with selection, delay testing, auto-test on load
   - `logs.go` - Log display (thread-safe, max 100 lines)
   - `styles.go` - Lipgloss styling definitions
-- `internal/singleinstance/singleinstance.go` - PID file mechanism (/tmp/clashTUI.pid)
+- `internal/singleinstance/singleinstance.go` - PID file mechanism (/tmp/clashtui.pid)
 
 ### Key Message Types (internal/tui/nodes.go)
 
@@ -53,7 +53,7 @@ ClashTUI is a terminal UI for managing Clash/mihomo proxy. Uses BubbleTea framew
 
 ### Runtime Requirements
 
-- TUN mode: `sudo setcap cap_net_admin+ep ~/.config/clashTUI/core/clash`
+- TUN mode: `sudo setcap cap_net_admin+ep ~/.config/clashtui/core/clash`
 - Clipboard: `wl-clipboard` (Wayland) or `xclip`/`xsel` (X11)
 
 ## Protocol Support

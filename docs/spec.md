@@ -9,7 +9,7 @@
 ### 1. 订阅导入
 - 手动输入订阅链接
 - 从剪贴板读取订阅链接（使用 xclip/xsel）
-- 下载并保存配置到 `~/.config/clashTUI/config.yaml`
+- 下载并保存配置到 `~/.config/clashtui/config.yaml`
 
 ### 2. 节点管理
 - 列出所有代理节点
@@ -19,12 +19,12 @@
 
 ### 3. Clash 控制
 - 启动/停止 Clash 内核
-- 内置 mihomo 内核（首次启动自动下载到 `~/.config/clashTUI/core/`)
+- 内置 mihomo 内核（首次启动自动下载到 `~/.config/clashtui/core/`)
 - 内核 API 地址: `127.0.0.1:9090`
 - 混合端口: `7890`
 
 ### 4. 单实例机制
-- PID 文件: `/tmp/clashTUI.pid`
+- PID 文件: `/tmp/clashtui.pid`
 - 启动时检查已有进程
 - 若已运行则唤醒（发送 SIGUSR1），不启动新实例
 
@@ -38,7 +38,7 @@
 ## 数据目录结构
 
 ```
-~/.config/clashTUI/
+~/.config/clashtui/
 ├── core/
 │   └── clash          # mihomo 内核二进制
 ├── config.yaml        # 当前 Clash 配置
@@ -101,7 +101,7 @@ GET http://127.0.0.1:9090/proxies/{节点名称}/delay?timeout=5000&url=http://w
 首次启动自动下载 mihomo 内核：
 - 源: `https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/latest`
 - 文件: `mihomo-linux-amd64.gz`
-- 解压到: `~/.config/clashTUI/core/clash`
+- 解压到: `~/.config/clashtui/core/clash`
 
 ## 成功标准
 

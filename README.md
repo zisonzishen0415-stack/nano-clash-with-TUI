@@ -74,7 +74,7 @@ go build -o clashtui .
 
 - Linux (支持 Wayland/X11)
 - Go 1.21+
-- TUN模式需要: `sudo setcap cap_net_admin+ep ~/.config/clashTUI/core/clash`
+- TUN模式需要: `sudo setcap cap_net_admin+ep ~/.config/clashtui/core/clash`
 
 ## Clipboard支持
 
