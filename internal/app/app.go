@@ -186,8 +186,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startAction("Restarting core")
 			return m, m.toggleCore()
 		case "q", "ctrl+c":
-			m.startAction("Exiting")
-			return m, tea.Quit
+			// 退出 TUI 但不停止 clash 服务
+			return m, tea.Sequence(
+				func() tea.Msg {
+					fmt.Println("\n  ✓ Exited TUI - clash core still running")
+					fmt.Println("  Run 'clashtui' to reopen, or 'clashtui --stop' to stop proxy")
+					return nil
+				},
+				tea.Quit,
+			)
 		}
 
 		if m.tab == 0 {
