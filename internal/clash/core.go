@@ -31,6 +31,11 @@ func getCoreDownloadURL() string {
 	return fmt.Sprintf("https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-linux-%s-%s.gz", coreVersion, arch, coreVersion)
 }
 
+type SubscriptionInfo struct {
+	Traffic string
+	Expiry  string
+}
+
 type Core struct{}
 
 // Global process tracking to prevent zombies
@@ -181,13 +186,13 @@ func ungzip(src, dst string) error {
 	return err
 }
 
-func DownloadSubscription(subURL string) ([]byte, error) {
+func DownloadSubscription(subURL string, proxyPort, apiPort int) ([]byte, SubscriptionInfo, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(subURL)
-	if err != nil { return nil, fmt.Errorf("fetch: %w", err) }
+	if err != nil { return nil, SubscriptionInfo{}, fmt.Errorf("fetch: %w", err) }
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 { return nil, fmt.Errorf("status: %d", resp.StatusCode) }
+	if resp.StatusCode != 200 { return nil, SubscriptionInfo{}, fmt.Errorf("status: %d", resp.StatusCode) }
 
 	data, _ := io.ReadAll(resp.Body)
 	s := strings.TrimSpace(string(data))
@@ -206,15 +211,15 @@ func DownloadSubscription(subURL string) ([]byte, error) {
 		}
 	}
 
-	configData := []byte(buildConfig(nodes))
-	if err := config.SaveConfig(configData); err != nil { return nil, err }
-	if err := config.SaveSubscription(subURL); err != nil { return nil, err }
-	return configData, nil
+	configData := []byte(buildConfig(nodes, proxyPort, apiPort))
+	if err := config.SaveConfig(configData); err != nil { return nil, SubscriptionInfo{}, err }
+	if err := config.SaveSubscription(subURL); err != nil { return nil, SubscriptionInfo{}, err }
+	return data, SubscriptionInfo{}, nil
 }
 
-func buildConfig(nodes []string) string {
+func buildConfig(nodes []string, proxyPort, apiPort int) string {
 	var b strings.Builder
-	b.WriteString("mixed-port: 7890\nallow-lan: true\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:9090\n")
+	b.WriteString(fmt.Sprintf("mixed-port: %d\nallow-lan: true\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:%d\n", proxyPort, apiPort))
 
 	names := []string{}
 	realNodes := []string{}
