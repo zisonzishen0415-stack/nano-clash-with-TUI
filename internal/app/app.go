@@ -50,6 +50,11 @@ func New() Model {
 
 	running := client.IsConnected()
 
+	// 如果 core 已运行，设置系统代理（如果启用）
+	if running && s.SystemProxy {
+		proxy.SetSystemProxy()
+	}
+
 	return Model{
 		tab:      0,
 		nodes:    nodes,
@@ -186,15 +191,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startAction("Restarting core")
 			return m, m.toggleCore()
 		case "q", "ctrl+c":
-			// 退出 TUI 但不停止 clash 服务
-			return m, tea.Sequence(
-				func() tea.Msg {
-					fmt.Println("\n  ✓ Exited TUI - clash core still running")
-					fmt.Println("  Run 'clashtui' to reopen, or 'clashtui --stop' to stop proxy")
-					return nil
-				},
-				tea.Quit,
-			)
+			// 退出 TUI
+			return m, tea.Quit
 		}
 
 		if m.tab == 0 {
@@ -212,7 +210,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
-	totalRows := len(m.settings.Subscriptions) + 1 + 1 + 3 + 1 + 2
+	totalRows := len(m.settings.Subscriptions) + 1 + 1 + 4 + 1 + 2
 
 	switch k {
 	case "j", "down":
@@ -275,7 +273,7 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 	settingsStart := addRow + 1
 	settingsIdx := row - settingsStart
 
-	if settingsIdx >= 0 && settingsIdx < 3 {
+	if settingsIdx >= 0 && settingsIdx < 4 {
 		switch settingsIdx {
 		case 0:
 			m.settings.AutoStart = !m.settings.AutoStart
@@ -305,10 +303,25 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 			}
 			m.addLog("✓ Auto select best: " + status)
 			return m, nil
+		case 3:
+			m.settings.SystemProxy = !m.settings.SystemProxy
+			settings.Save(m.settings)
+			if m.settings.SystemProxy {
+				if m.running {
+					proxy.SetSystemProxy()
+					m.addLog("✓ System proxy: on")
+				} else {
+					m.addLog("✓ System proxy: on (will enable when core starts)")
+				}
+			} else {
+				proxy.UnsetSystemProxy()
+				m.addLog("✓ System proxy: off")
+			}
+			return m, nil
 		}
 	}
 
-	portsStart := settingsStart + 3
+	portsStart := settingsStart + 4
 	portIdx := row - portsStart
 
 	if portIdx == 0 {
@@ -658,8 +671,8 @@ func (m Model) configView() string {
 	b.WriteString("\n  Settings:\n")
 
 	settingsStart := addRow + 1
-	opts := []string{"Auto start on boot", "Auto test delay", "Auto select fastest"}
-	values := []bool{m.settings.AutoStart, m.settings.AutoTestDelay, m.settings.AutoSelectBest}
+	opts := []string{"Auto start on boot", "Auto test delay", "Auto select fastest", "System proxy"}
+	values := []bool{m.settings.AutoStart, m.settings.AutoTestDelay, m.settings.AutoSelectBest, m.settings.SystemProxy}
 
 	for i, opt := range opts {
 		row := settingsStart + i
@@ -674,7 +687,7 @@ func (m Model) configView() string {
 		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, check, opt))
 	}
 
-	portsStart := settingsStart + 3
+	portsStart := settingsStart + 4
 	b.WriteString("\n  Ports:\n")
 
 	proxyPrefix := "  "
@@ -735,7 +748,10 @@ func (m Model) switchSubscription() tea.Cmd {
 			return tui.MsgLogLine("Error starting: " + err.Error())
 		}
 		
-		proxy.SetSystemProxy()
+		// Use existing s from line 730
+		if s.SystemProxy {
+			proxy.SetSystemProxy()
+		}
 		m.running = true
 		m.addLog("Core started")
 		
@@ -786,8 +802,11 @@ func (m Model) toggleCore() tea.Cmd {
 			if err != nil {
 				return tui.MsgLogLine("⚠ Error starting: " + err.Error())
 			}
-			proxy.SetSystemProxy()
-			return tui.MsgLogLine("✓ Core started, proxy enabled")
+			if m.settings.SystemProxy {
+				proxy.SetSystemProxy()
+				return tui.MsgLogLine("✓ Core started, proxy enabled")
+			}
+			return tui.MsgLogLine("✓ Core started (proxy disabled)")
 		},
 	)
 }
@@ -833,7 +852,9 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
-		proxy.SetSystemProxy()
+			if m.settings.SystemProxy {
+				proxy.SetSystemProxy()
+			}
 		m.running = true
 		m.addLog("Core started")
 
@@ -879,7 +900,9 @@ func (m Model) importNodes(name, content string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
-		proxy.SetSystemProxy()
+			if m.settings.SystemProxy {
+				proxy.SetSystemProxy()
+			}
 		m.running = true
 		m.addLog("✓ Core started with imported nodes")
 

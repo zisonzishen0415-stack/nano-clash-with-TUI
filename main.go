@@ -128,10 +128,20 @@ func runTUI() {
 		core.Stop()
 	}
 
-	p := tea.NewProgram(app.New(), tea.WithAltScreen())
+	// 不使用 alt screen，这样退出消息能正常显示
+	p := tea.NewProgram(app.New())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
+	}
+
+	// 退出后显示消息
+	client = clash.NewClient(getAPIPort())
+	if client.IsConnected() {
+		fmt.Println("\n  ✓ Exited TUI - clash core still running")
+		fmt.Println("  Run 'clashtui' to reopen, or 'clashtui --stop' to stop proxy")
+	} else {
+		fmt.Println("\n  ✓ Exited TUI - clash core stopped")
 	}
 }
 
