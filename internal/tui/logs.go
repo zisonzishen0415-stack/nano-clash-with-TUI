@@ -14,11 +14,11 @@ type LogsModel struct {
 
 type MsgLogLine string
 
-func NewLogsModel() LogsModel {
-	return LogsModel{lines: []string{}}
+func NewLogsModel() *LogsModel {
+	return &LogsModel{lines: []string{}}
 }
 
-func (m LogsModel) Init() tea.Cmd {
+func (m *LogsModel) Init() tea.Cmd {
 	return nil
 }
 
@@ -35,7 +35,9 @@ func (m *LogsModel) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-func (m LogsModel) View() string {
+func (m *LogsModel) View() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(m.lines) == 0 {
 		return "  No logs yet."
 	}

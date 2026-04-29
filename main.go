@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -16,6 +19,9 @@ import (
 
 func main() {
 	args := os.Args[1:]
+
+	// 启动时检查：如果 clash 没运行，清除代理设置（解决关机后遗留问题）
+	cleanStaleProxySettings()
 
 	if len(args) > 0 {
 		switch args[0] {
@@ -37,7 +43,17 @@ func main() {
 	runTUI()
 }
 
+// cleanStaleProxySettings 检查 clash 是否运行，如果没运行就清除代理设置
+func cleanStaleProxySettings() {
+	client := clash.NewClient()
+	if !client.IsConnected() {
+		// clash 没运行，清除可能遗留的代理设置
+		proxy.UnsetSystemProxy()
+	}
+}
+
 func printStatus() {
+	// 直接查询 Clash API，获取真实状态
 	client := clash.NewClient()
 	connected := client.IsConnected()
 
@@ -83,8 +99,10 @@ func runDaemon() {
 		proxy.SetSystemProxy()
 	}
 
-	// Keep running until killed
-	select {}
+	// Wait for termination signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	<-sigCh
 }
 
 func runTUI() {
@@ -98,9 +116,9 @@ func runTUI() {
 	}
 
 	defer singleinstance.Release()
-	defer cleanupOnExit()
+	// TUI 退出时不清理 clash - 让服务继续运行
 
-	// Only stop clash if API is not responding (truly leftover process)
+	// Only stop clash if API is not responding (truly leftover zombie process)
 	client := clash.NewClient()
 	if !client.IsConnected() {
 		core := clash.NewCore()
@@ -115,6 +133,22 @@ func runTUI() {
 }
 
 func stopAll() {
+	// First, try to send SIGTERM to daemon process
+	daemonPid, err := singleinstance.ReadPID()
+	if err == nil && daemonPid > 0 {
+		process, _ := os.FindProcess(daemonPid)
+		// Send SIGTERM to daemon, it will cleanup properly via defer
+		process.Signal(syscall.SIGTERM)
+		// Wait for process to exit (poll since Wait() only works for children)
+		for i := 0; i < 10; i++ {
+			if process.Signal(syscall.Signal(0)) != nil {
+				break // Process exited
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// Fallback: directly stop clash (if daemon not running)
 	core := clash.NewCore()
 	core.Stop()
 	proxy.UnsetSystemProxy()

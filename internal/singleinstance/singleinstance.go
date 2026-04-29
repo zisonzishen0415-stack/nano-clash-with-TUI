@@ -40,6 +40,11 @@ func readPID() (int, error) {
 	return strconv.Atoi(string(data))
 }
 
+// ReadPID exports the readPID function for external use
+func ReadPID() (int, error) {
+	return readPID()
+}
+
 func writePID() (bool, error) {
 	pid := os.Getpid()
 	err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0644)

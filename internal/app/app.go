@@ -2,6 +2,9 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -9,19 +12,22 @@ import (
 	"clashtui/internal/clipboard"
 	"clashtui/internal/config"
 	"clashtui/internal/proxy"
+	"clashtui/internal/settings"
 	"clashtui/internal/tui"
 )
 
 type Model struct {
-	tab      int
-	nodes    tui.NodesModel
-	logs     tui.LogsModel
-	core     *clash.Core
-	client   *clash.Client
-	running  bool
-	err      string
-	subInput bool
-	subURL   string
+	tab       int
+	nodes     tui.NodesModel
+	logs      *tui.LogsModel
+	core      *clash.Core
+	client    *clash.Client
+	running   bool
+	err       string
+	subInput  bool
+	subURL    string
+	settings  settings.Settings
+	setIdx    int // settings menu index
 }
 
 func New() Model {
@@ -29,17 +35,18 @@ func New() Model {
 	core := clash.NewCore()
 	nodes := tui.NewNodesModel(client)
 	logs := tui.NewLogsModel()
+	s := settings.Load()
 
-	// Check if clash is already running
 	running := client.IsConnected()
 
 	return Model{
-		tab:     0,
-		nodes:   nodes,
-		logs:    logs,
-		core:    core,
-		client:  client,
-		running: running,
+		tab:      0,
+		nodes:    nodes,
+		logs:     logs,
+		core:     core,
+		client:   client,
+		running:  running,
+		settings: s,
 	}
 }
 
@@ -69,6 +76,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		k := msg.String()
 
+		// Tab switching
 		switch k {
 		case "h", "left":
 			if m.tab > 0 {
@@ -91,6 +99,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Global keys
 		switch k {
 		case "x":
 			m.core.Stop()
@@ -109,12 +118,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Tab-specific keys
 		if m.tab == 0 {
 			cmd := m.nodes.Update(msg)
 			return m, cmd
 		}
+
+		if m.tab == 1 {
+			return m.handleSettingsKeys(k)
+		}
 	}
 
+	return m, nil
+}
+
+func (m Model) handleSettingsKeys(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "j", "down":
+		if m.setIdx < 4 {
+			m.setIdx++
+		}
+		return m, nil
+	case "k", "up":
+		if m.setIdx > 0 {
+			m.setIdx--
+		}
+		return m, nil
+	case "enter", " ":
+		switch m.setIdx {
+		case 0:
+			m.settings.AutoStart = !m.settings.AutoStart
+			settings.Save(m.settings)
+			// Enable/disable systemd service
+			home, _ := os.UserHomeDir()
+			serviceDir := filepath.Join(home, ".config", "systemd", "user")
+			serviceFile := filepath.Join(serviceDir, "clashtui.service")
+
+			if m.settings.AutoStart {
+				// Create directory and write service file
+				os.MkdirAll(serviceDir, 0755)
+				serviceContent := `[Unit]
+Description=ClashTUI - Clash proxy manager
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=` + filepath.Join(home, ".local", "bin", "clashtui") + ` --daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target`
+				os.WriteFile(serviceFile, []byte(serviceContent), 0644)
+				exec.Command("systemctl", "--user", "enable", "clashtui.service").Run()
+				exec.Command("systemctl", "--user", "daemon-reload").Run()
+				return m, func() tea.Msg { return tui.MsgLogLine("Auto start enabled") }
+			} else {
+				exec.Command("systemctl", "--user", "disable", "clashtui.service").Run()
+				os.Remove(serviceFile)
+				exec.Command("systemctl", "--user", "daemon-reload").Run()
+				return m, func() tea.Msg { return tui.MsgLogLine("Auto start disabled") }
+			}
+		case 1:
+			m.settings.AutoTestDelay = !m.settings.AutoTestDelay
+			settings.Save(m.settings)
+			return m, nil
+		case 2:
+			m.settings.AutoSelectBest = !m.settings.AutoSelectBest
+			settings.Save(m.settings)
+			return m, nil
+		}
+	}
 	return m, nil
 }
 
@@ -193,13 +266,36 @@ func (m Model) configView() string {
 	s := "\n"
 	sub, err := config.LoadSubscription()
 	if err != nil {
-		s += "  No subscription saved.\n\n"
+		s += "  Subscription: none\n\n"
 	} else {
 		s += "  Subscription: " + sub + "\n\n"
 	}
 
-	s += "  c: import from clipboard | s: enter subscription URL\n"
-	s += "  r: refresh sub & start/stop core\n"
+	// Settings menu
+	opts := []struct {
+		name  string
+		value bool
+	}{
+		{"Auto start on boot", m.settings.AutoStart},
+		{"Auto test delay", m.settings.AutoTestDelay},
+		{"Auto select fastest", m.settings.AutoSelectBest},
+	}
+
+	s += "  Settings:\n"
+	for i, opt := range opts {
+		prefix := "  "
+		if i == m.setIdx {
+			prefix = "> "
+		}
+		check := "[ ]"
+		if opt.value {
+			check = "[x]"
+		}
+		s += fmt.Sprintf("%s%s %s\n", prefix, check, opt.name)
+	}
+
+	s += "\n  j/k: select | enter: toggle\n"
+	s += "  c: import clipboard | s: enter URL | r: refresh\n"
 	return s
 }
 
@@ -246,32 +342,6 @@ func (m Model) toggleCore() tea.Cmd {
 	)
 }
 
-func (m Model) refreshSubscription() tea.Cmd {
-	return func() tea.Msg {
-		sub, err := config.LoadSubscription()
-		if err != nil {
-			m.err = "no subscription saved"
-			return nil
-		}
-
-		m.logs.AddLine("Refreshing subscription...")
-		_, err = clash.DownloadSubscription(sub)
-		if err != nil {
-			m.logs.AddLine("Error: " + err.Error())
-			m.err = err.Error()
-			return nil
-		}
-
-		m.core.Stop()
-		m.core.Start()
-		m.running = true
-		m.logs.AddLine("Subscription refreshed")
-		m.err = ""
-
-		return tui.MsgRefresh{}
-	}
-}
-
 func (m Model) importFromClipboard() tea.Cmd {
 	return func() tea.Msg {
 		url, err := clipboard.Read()
@@ -308,6 +378,7 @@ func (m Model) downloadSub(url string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
+		proxy.SetSystemProxy()
 		m.running = true
 		m.logs.AddLine("Core started")
 
