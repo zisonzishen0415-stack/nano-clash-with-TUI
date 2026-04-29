@@ -118,6 +118,15 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 		m.testIdx = msg.Index
 		return nil
 
+	case MsgTestAllStarted:
+		// 启动全部测试
+		m.testing = true
+		m.testIdx = 0
+		return tea.Sequence(
+			func() tea.Msg { return MsgTestProgress{Index: 0, Total: len(m.proxies)} },
+			m.testDelay(0),
+		)
+
 	case MsgDelayTested:
 		if msg.Index < len(m.proxies) {
 			m.proxies[msg.Index].Delay = msg.Delay
@@ -190,13 +199,7 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 		case "t":
 			// 测试所有节点并按速度排序
 			if len(m.proxies) > 0 && !m.testing {
-				m.testing = true
-				m.testIdx = 0
-				return tea.Sequence(
-					func() tea.Msg { return MsgTestAllStarted{Total: len(m.proxies)} },
-					func() tea.Msg { return MsgTestProgress{Index: 0, Total: len(m.proxies)} },
-					m.testDelay(0),
-				)
+				return func() tea.Msg { return MsgTestAllStarted{Total: len(m.proxies)} }
 			}
 		}
 	}
