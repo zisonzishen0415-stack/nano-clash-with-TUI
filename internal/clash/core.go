@@ -3,6 +3,7 @@ package clash
 import (
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -259,8 +260,18 @@ func ungzip(src, dst string) error {
 }
 
 func DownloadSubscription(subURL string, proxyPort, apiPort int) ([]byte, SubscriptionInfo, error) {
+	if subURL == "" {
+		return nil, SubscriptionInfo{}, fmt.Errorf("empty subscription URL")
+	}
+
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(subURL)
+	req, err := http.NewRequest("GET", subURL, nil)
+	if err != nil { return nil, SubscriptionInfo{}, fmt.Errorf("create request: %w", err) }
+	
+	req.Header.Set("User-Agent", "ClashforWindows/0.20.39")
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := client.Do(req)
 	if err != nil { return nil, SubscriptionInfo{}, fmt.Errorf("fetch: %w", err) }
 	defer resp.Body.Close()
 
@@ -269,26 +280,76 @@ func DownloadSubscription(subURL string, proxyPort, apiPort int) ([]byte, Subscr
 	data, _ := io.ReadAll(resp.Body)
 	s := strings.TrimSpace(string(data))
 
-	decoded, _ := base64.StdEncoding.DecodeString(s)
-	lines := strings.Split(string(decoded), "\n")
+	info := parseSubscriptionInfo(subURL, resp.Header)
 
+	var configData []byte
+
+	if strings.HasPrefix(s, "proxies:") || strings.HasPrefix(s, "mixed-port:") {
+		configData = data
+	} else {
+		nodes := parseSubscriptionContent(s)
+		if len(nodes) == 0 {
+			return nil, info, fmt.Errorf("no valid nodes found in subscription")
+		}
+		configData = []byte(buildConfig(nodes, proxyPort, apiPort))
+	}
+
+	if err := config.SaveConfig(configData); err != nil { return nil, SubscriptionInfo{}, err }
+	return data, info, nil
+}
+
+func parseSubscriptionContent(content string) []string {
+	s := strings.TrimSpace(content)
 	var nodes []string
+
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err == nil && len(decoded) > 0 {
+		lines := strings.Split(string(decoded), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if isValidNodeLink(line) {
+				nodes = append(nodes, line)
+			}
+		}
+		if len(nodes) > 0 {
+			return nodes
+		}
+	}
+
+	decodedRaw, err := base64.RawStdEncoding.DecodeString(s)
+	if err == nil && len(decodedRaw) > 0 {
+		lines := strings.Split(string(decodedRaw), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if isValidNodeLink(line) {
+				nodes = append(nodes, line)
+			}
+		}
+		if len(nodes) > 0 {
+			return nodes
+		}
+	}
+
+	lines := strings.Split(s, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "trojan://") ||
-			strings.HasPrefix(line, "vless://") ||
-			strings.HasPrefix(line, "hysteria2://") ||
-			strings.HasPrefix(line, "hy2://") {
+		if isValidNodeLink(line) {
 			nodes = append(nodes, line)
 		}
 	}
 
-	info := parseSubscriptionInfo(subURL, resp.Header)
+	return nodes
+}
 
-	configData := []byte(buildConfig(nodes, proxyPort, apiPort))
-	if err := config.SaveConfig(configData); err != nil { return nil, SubscriptionInfo{}, err }
-	if err := config.SaveSubscription(subURL); err != nil { return nil, SubscriptionInfo{}, err }
-	return data, info, nil
+func isValidNodeLink(link string) bool {
+	return strings.HasPrefix(link, "trojan://") ||
+		strings.HasPrefix(link, "vless://") ||
+		strings.HasPrefix(link, "vmess://") ||
+		strings.HasPrefix(link, "ss://") ||
+		strings.HasPrefix(link, "ssr://") ||
+		strings.HasPrefix(link, "hysteria2://") ||
+		strings.HasPrefix(link, "hy2://") ||
+		strings.HasPrefix(link, "hysteria://")
 }
 
 func buildConfig(nodes []string, proxyPort, apiPort int) string {
@@ -412,6 +473,76 @@ func parseNodeConfig(link string) string {
 			if q.Get("sni") != "" { sni = q.Get("sni") }
 		}
 		return fmt.Sprintf("  - name: \"%s\"\n    type: hysteria2\n    server: %s\n    port: %s\n    password: %s\n    sni: %s\n", name, host, port, pass, sni)
+	}
+
+	if strings.HasPrefix(link, "vmess://") {
+		link = strings.TrimPrefix(link, "vmess://")
+		decoded, err := base64.StdEncoding.DecodeString(link)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(link)
+			if err != nil { return "" }
+		}
+		var vm map[string]interface{}
+		if err := json.Unmarshal(decoded, &vm); err != nil { return "" }
+		server, _ := vm["add"].(string)
+		port, _ := vm["port"].(string)
+		uuid, _ := vm["id"].(string)
+		net, _ := vm["net"].(string)
+		if net == "" { net = "tcp" }
+		tls, _ := vm["tls"].(string)
+		hostHeader, _ := vm["host"].(string)
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: vmess\n    server: %s\n    port: %s\n    uuid: %s\n    network: %s\n", name, server, port, uuid, net)
+		if tls == "tls" {
+			r += "    tls: true\n"
+		}
+		if hostHeader != "" && net == "ws" {
+			r += fmt.Sprintf("    ws-headers:\n      Host: %s\n", hostHeader)
+		}
+		return r
+	}
+
+	if strings.HasPrefix(link, "ss://") {
+		link = strings.TrimPrefix(link, "ss://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		var decoded string
+		d, err := base64.StdEncoding.DecodeString(link)
+		if err != nil {
+			d, err = base64.RawStdEncoding.DecodeString(link)
+			if err != nil {
+				decoded = link
+			} else {
+				decoded = string(d)
+			}
+		} else {
+			decoded = string(d)
+		}
+		p := strings.SplitN(decoded, "@", 2)
+		if len(p) == 2 {
+			methodPass := p[0]
+			mp := strings.SplitN(methodPass, ":", 2)
+			if len(mp) != 2 { return "" }
+			method, pass := mp[0], mp[1]
+			hp := strings.SplitN(p[1], ":", 2)
+			if len(hp) != 2 { return "" }
+			return fmt.Sprintf("  - name: \"%s\"\n    type: ss\n    server: %s\n    port: %s\n    cipher: %s\n    password: %s\n", name, hp[0], hp[1], method, pass)
+		}
+		return ""
+	}
+
+	if strings.HasPrefix(link, "hysteria://") {
+		link = strings.TrimPrefix(link, "hysteria://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		p := strings.SplitN(link, "@", 2)
+		if len(p) != 2 { return "" }
+		pass := p[0]
+		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
+		if len(hp) != 2 { return "" }
+		host, port := hp[0], hp[1]
+		return fmt.Sprintf("  - name: \"%s\"\n    type: hysteria\n    server: %s\n    port: %s\n    auth_str: %s\n", name, host, port, pass)
 	}
 
 	return ""

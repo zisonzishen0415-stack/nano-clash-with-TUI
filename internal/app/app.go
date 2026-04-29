@@ -285,6 +285,23 @@ func (m Model) handleInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputBuf = m.inputBuf[:len(m.inputBuf)-1]
 		}
 		return m, nil
+	case "c":
+		if m.inputMode == "url" {
+			url, err := clipboard.Read()
+			if err != nil {
+				m.err = "clipboard: " + err.Error()
+				return m, nil
+			}
+			if len(url) < 4 || url[:4] != "http" {
+				m.err = "no valid URL in clipboard"
+				return m, nil
+			}
+			m.inputBuf = url
+			m.err = ""
+			return m, nil
+		}
+		m.inputBuf += "c"
+		return m, nil
 	default:
 		if len(k) == 1 {
 			m.inputBuf += k
@@ -302,6 +319,24 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 			m.inputBuf = ""
 			return m, nil
 		} else if m.inputBuf == "2" {
+			m.addType = "subscription"
+			url, err := clipboard.Read()
+			if err != nil {
+				m.err = "clipboard: " + err.Error()
+				m.inputMode = ""
+				return m, nil
+			}
+			if len(url) < 4 || url[:4] != "http" {
+				m.err = "no valid URL in clipboard"
+				m.inputMode = ""
+				return m, nil
+			}
+			m.urlBuf = url
+			m.inputMode = "name"
+			m.inputBuf = ""
+			m.err = ""
+			return m, nil
+		} else if m.inputBuf == "3" {
 			m.addType = "manual"
 			m.inputMode = "name"
 			m.inputBuf = ""
@@ -397,9 +432,9 @@ func (m Model) View() string {
 func (m Model) renderInputMode() string {
 	switch m.inputMode {
 	case "add_type":
-		return fmt.Sprintf("\n  Add new:\n  [1] Subscription (URL)\n  [2] Manual (nodes)\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Add new:\n  [1] Subscription - type URL\n  [2] Subscription - paste from clipboard\n  [3] Manual (nodes)\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
 	case "url":
-		return fmt.Sprintf("\n  Enter subscription URL:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Enter subscription URL:\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
 	case "name":
 		return fmt.Sprintf("\n  Enter name:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
 	case "proxy_port":
@@ -489,17 +524,40 @@ func (m Model) coreStatus() string {
 func (m Model) switchSubscription() tea.Cmd {
 	return func() tea.Msg {
 		m.core.Stop()
-		sub := settings.GetActiveSubscription(m.settings)
-		if sub == nil {
+		m.logs.AddLine("Switching subscription...")
+		
+		s := settings.Load()
+		sub := settings.GetActiveSubscription(s)
+		if sub == nil || sub.URL == "" {
 			return tui.MsgLogLine("No subscription")
 		}
-		_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
+		
+		m.logs.AddLine("Downloading: " + sub.URL)
+		_, info, err := clash.DownloadSubscription(sub.URL, s.ProxyPort, s.APIPort)
 		if err != nil {
 			return tui.MsgLogLine("Error: " + err.Error())
 		}
-		m.core.Start()
+		
+		if info.Traffic != "" || info.Expiry != "" {
+			s.Subscriptions[s.ActiveSubIdx].Traffic = info.Traffic
+			s.Subscriptions[s.ActiveSubIdx].Expiry = info.Expiry
+			s.Subscriptions[s.ActiveSubIdx].LastUpdate = time.Now()
+			settings.Save(s)
+		}
+		
+		if !m.core.IsInstalled() {
+			m.core.Install()
+			m.core.DownloadGeoData()
+		}
+		
+		if err := m.core.Start(); err != nil {
+			return tui.MsgLogLine("Error starting: " + err.Error())
+		}
+		
 		proxy.SetSystemProxy()
 		m.running = true
+		m.logs.AddLine("Core started")
+		
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
 }
