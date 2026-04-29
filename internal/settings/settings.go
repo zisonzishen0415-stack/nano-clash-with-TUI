@@ -4,23 +4,38 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const SettingsFile = "settings.json"
 
+type Subscription struct {
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	Traffic    string    `json:"traffic"`
+	Expiry     string    `json:"expiry"`
+	LastUpdate time.Time `json:"last_update"`
+}
+
 type Settings struct {
-	AutoStart      bool `json:"auto_start"`       // 开机自启动
-	AutoTestDelay  bool `json:"auto_test_delay"`  // 自动测速
-	AutoSelectBest bool `json:"auto_select_best"` // 自动选择最快节点
-	DefaultNode    string `json:"default_node"`    // 默认节点（空=自动选择）
-	ProxyPort      int  `json:"proxy_port"`       // 代理端口
-	APIPort        int  `json:"api_port"`         // API 端口
+	Subscriptions  []Subscription `json:"subscriptions"`
+	ActiveSubIdx   int            `json:"active_sub_idx"`
+	AutoStart      bool           `json:"auto_start"`
+	AutoTestDelay  bool           `json:"auto_test_delay"`
+	AutoSelectBest bool           `json:"auto_select_best"`
+	UseDefaultNode bool           `json:"use_default_node"`
+	DefaultNode    string         `json:"default_node"`
+	ProxyPort      int            `json:"proxy_port"`
+	APIPort        int            `json:"api_port"`
 }
 
 var DefaultSettings = Settings{
+	Subscriptions:  []Subscription{},
+	ActiveSubIdx:   0,
 	AutoStart:      false,
 	AutoTestDelay:  true,
 	AutoSelectBest: true,
+	UseDefaultNode: false,
 	DefaultNode:    "",
 	ProxyPort:      7890,
 	APIPort:        9090,
@@ -45,12 +60,14 @@ func Load() Settings {
 		return DefaultSettings
 	}
 
-	// Apply defaults for missing fields
 	if s.ProxyPort == 0 {
 		s.ProxyPort = DefaultSettings.ProxyPort
 	}
 	if s.APIPort == 0 {
 		s.APIPort = DefaultSettings.APIPort
+	}
+	if s.Subscriptions == nil {
+		s.Subscriptions = []Subscription{}
 	}
 
 	return s
@@ -73,4 +90,45 @@ func Save(s Settings) error {
 
 func GetSettingsPath() string {
 	return settingsPath
+}
+
+func GetActiveSubscription(s Settings) *Subscription {
+	if len(s.Subscriptions) == 0 {
+		return nil
+	}
+	if s.ActiveSubIdx < 0 || s.ActiveSubIdx >= len(s.Subscriptions) {
+		return nil
+	}
+	return &s.Subscriptions[s.ActiveSubIdx]
+}
+
+func AddSubscription(s *Settings, name, url string) {
+	sub := Subscription{
+		Name: name,
+		URL:  url,
+	}
+	s.Subscriptions = append(s.Subscriptions, sub)
+	Save(*s)
+}
+
+func RemoveSubscription(s *Settings, idx int) {
+	if idx < 0 || idx >= len(s.Subscriptions) {
+		return
+	}
+	s.Subscriptions = append(s.Subscriptions[:idx], s.Subscriptions[idx+1:]...)
+	if s.ActiveSubIdx >= len(s.Subscriptions) {
+		s.ActiveSubIdx = len(s.Subscriptions) - 1
+	}
+	if s.ActiveSubIdx < 0 {
+		s.ActiveSubIdx = 0
+	}
+	Save(*s)
+}
+
+func SwitchSubscription(s *Settings, idx int) {
+	if idx < 0 || idx >= len(s.Subscriptions) {
+		return
+	}
+	s.ActiveSubIdx = idx
+	Save(*s)
 }
