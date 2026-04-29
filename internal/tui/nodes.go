@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,14 +12,16 @@ import (
 )
 
 type NodesModel struct {
-	proxies  []clash.ProxyInfo
-	selected int
-	current  string
-	loading  bool
-	client   *clash.Client
-	testing  bool
-	testIdx  int
-	retries  int
+	proxies        []clash.ProxyInfo
+	selected       int
+	current        string
+	loading        bool
+	client         *clash.Client
+	testing        bool
+	testIdx        int
+	retries        int
+	autoSelectBest bool
+	initialLoad    bool
 }
 
 type MsgProxiesLoaded []clash.ProxyInfo
@@ -36,7 +39,14 @@ type MsgTestProgress struct {
 type MsgStopCore struct{}
 
 func NewNodesModel(client *clash.Client) NodesModel {
-	return NodesModel{client: client, loading: true, testing: false, retries: 0}
+	return NodesModel{
+		client:         client,
+		loading:        true,
+		testing:        false,
+		retries:        0,
+		autoSelectBest: true,
+		initialLoad:    true,
+	}
 }
 
 func (m NodesModel) Init() tea.Cmd {
@@ -49,6 +59,18 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 		m.proxies = msg
 		m.loading = false
 		m.retries = 0
+		sort.Slice(m.proxies, func(i, j int) bool {
+			if m.proxies[i].Delay == 0 && m.proxies[j].Delay == 0 {
+				return m.proxies[i].Name < m.proxies[j].Name
+			}
+			if m.proxies[i].Delay == 0 {
+				return false
+			}
+			if m.proxies[j].Delay == 0 {
+				return true
+			}
+			return m.proxies[i].Delay < m.proxies[j].Delay
+		})
 		if len(m.proxies) > 0 {
 			if m.selected >= len(m.proxies) {
 				m.selected = 0
@@ -101,6 +123,36 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 			)
 		}
 		m.testing = false
+
+		sort.Slice(m.proxies, func(i, j int) bool {
+			if m.proxies[i].Delay == 0 && m.proxies[j].Delay == 0 {
+				return m.proxies[i].Name < m.proxies[j].Name
+			}
+			if m.proxies[i].Delay == 0 {
+				return false
+			}
+			if m.proxies[j].Delay == 0 {
+				return true
+			}
+			return m.proxies[i].Delay < m.proxies[j].Delay
+		})
+
+		if m.initialLoad && m.autoSelectBest && len(m.proxies) > 0 {
+			for _, p := range m.proxies {
+				if p.Delay > 0 {
+					m.current = p.Name
+					m.client.SwitchProxy(p.Name)
+					for i, proxy := range m.proxies {
+						if proxy.Name == p.Name {
+							m.selected = i
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+		m.initialLoad = false
 		return nil
 
 	case MsgRefresh:
@@ -193,13 +245,14 @@ func (m NodesModel) View() string {
 		if p.Delay == 0 {
 			delay = "-"
 		}
+		delayStyled := DelayStyle(p.Delay).Render(delay)
 
 		curr := ""
 		if p.Name == m.current {
 			curr = " [current]"
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s %s%s | %s\n", prefix, status, p.Name, curr, delay))
+		b.WriteString(fmt.Sprintf("%s%s %s%s | %s\n", prefix, status, p.Name, curr, delayStyled))
 	}
 
 	b.WriteString("\n  j/k: select | enter: switch | t: test | T: test all")
@@ -231,4 +284,8 @@ func (m NodesModel) testDelay(idx int) tea.Cmd {
 
 func (m NodesModel) GetCurrent() string {
 	return m.current
+}
+
+func (m *NodesModel) SetAutoSelectBest(enabled bool) {
+	m.autoSelectBest = enabled
 }
