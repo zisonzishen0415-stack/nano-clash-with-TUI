@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-const apiBase = "http://127.0.0.1:9090"
 const timeout = 10 * time.Second
 
 type Client struct {
@@ -17,9 +16,12 @@ type Client struct {
 	client  *http.Client
 }
 
-func NewClient() *Client {
+func NewClient(apiPort int) *Client {
+	if apiPort == 0 {
+		apiPort = 9090
+	}
 	return &Client{
-		baseURL: apiBase,
+		baseURL: fmt.Sprintf("http://127.0.0.1:%d", apiPort),
 		client:  &http.Client{Timeout: timeout},
 	}
 }
