@@ -591,5 +591,183 @@ func parseNodeConfig(link string) string {
 		return fmt.Sprintf("  - name: \"%s\"\n    type: hysteria\n    server: %s\n    port: %s\n    auth_str: %s\n", name, host, port, pass)
 	}
 
+	// SSR (ShadowsocksR)
+	if strings.HasPrefix(link, "ssr://") {
+		link = strings.TrimPrefix(link, "ssr://")
+		decoded, err := base64.StdEncoding.DecodeString(link)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(link)
+			if err != nil { decoded = []byte(link) }
+		}
+		// SSR format: server:port:protocol:method:obfs:password_base64/?obfsparam=...&protoparam=...&remarks=...
+		parts := strings.Split(string(decoded), "/?")
+		if len(parts) < 1 { return "" }
+		mainParts := strings.Split(parts[0], ":")
+		if len(mainParts) < 6 { return "" }
+		host, port, protocol, method, obfs := mainParts[0], mainParts[1], mainParts[2], mainParts[3], mainParts[4]
+		passDecoded, err := base64.StdEncoding.DecodeString(mainParts[5])
+		if err != nil {
+			passDecoded, err = base64.RawStdEncoding.DecodeString(mainParts[5])
+			if err != nil { passDecoded = []byte(mainParts[5]) }
+		}
+		password := string(passDecoded)
+		return fmt.Sprintf("  - name: \"%s\"\n    type: ssr\n    server: %s\n    port: %s\n    cipher: %s\n    password: %s\n    protocol: %s\n    obfs: %s\n", name, host, port, method, password, protocol, obfs)
+	}
+
+	// SOCKS5
+	if strings.HasPrefix(link, "socks5://") || strings.HasPrefix(link, "socks://") {
+		link = strings.TrimPrefix(link, "socks5://")
+		link = strings.TrimPrefix(link, "socks://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		// Format: user:pass@host:port or host:port
+		var user, pass, host, port string
+		if strings.Contains(link, "@") {
+			p := strings.SplitN(link, "@", 2)
+			up := strings.SplitN(p[0], ":", 2)
+			if len(up) == 2 {
+				user, pass = up[0], up[1]
+			}
+			hp := strings.SplitN(p[1], ":", 2)
+			if len(hp) == 2 {
+				host, port = hp[0], hp[1]
+			}
+		} else {
+			hp := strings.SplitN(link, ":", 2)
+			if len(hp) == 2 {
+				host, port = hp[0], hp[1]
+			}
+		}
+		if host == "" || port == "" { return "" }
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: socks5\n    server: %s\n    port: %s\n", name, host, port)
+		if user != "" {
+			r += fmt.Sprintf("    username: %s\n    password: %s\n", user, pass)
+		}
+		return r
+	}
+
+	// HTTP Proxy
+	if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
+		isTLS := strings.HasPrefix(link, "https://")
+		link = strings.TrimPrefix(link, "http://")
+		link = strings.TrimPrefix(link, "https://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		// Format: user:pass@host:port or host:port
+		var user, pass, host, port string
+		if strings.Contains(link, "@") {
+			p := strings.SplitN(link, "@", 2)
+			up := strings.SplitN(p[0], ":", 2)
+			if len(up) == 2 {
+				user, pass = up[0], up[1]
+			}
+			hp := strings.SplitN(p[1], ":", 2)
+			if len(hp) == 2 {
+				host, port = hp[0], hp[1]
+			}
+		} else {
+			hp := strings.SplitN(link, ":", 2)
+			if len(hp) == 2 {
+				host, port = hp[0], hp[1]
+			}
+		}
+		if host == "" || port == "" { return "" }
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: http\n    server: %s\n    port: %s\n", name, host, port)
+		if user != "" {
+			r += fmt.Sprintf("    username: %s\n    password: %s\n", user, pass)
+		}
+		if isTLS {
+			r += "    tls: true\n"
+		}
+		return r
+	}
+
+	// WireGuard - basic support
+	if strings.HasPrefix(link, "wireguard://") {
+		link = strings.TrimPrefix(link, "wireguard://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		// Format: privateKey@host:port?publicKey=...&reserved=...
+		p := strings.SplitN(link, "@", 2)
+		if len(p) != 2 { return "" }
+		privateKey := p[0]
+		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
+		if len(hp) != 2 { return "" }
+		host, port := hp[0], hp[1]
+		var publicKey, reserved string
+		if strings.Contains(p[1], "?") {
+			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
+			publicKey = q.Get("publicKey")
+			reserved = q.Get("reserved")
+		}
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: wireguard\n    server: %s\n    port: %s\n    private-key: %s\n", name, host, port, privateKey)
+		if publicKey != "" {
+			r += fmt.Sprintf("    peer-public-key: %s\n", publicKey)
+		}
+		if reserved != "" {
+			r += fmt.Sprintf("    reserved: [%s]\n", reserved)
+		}
+		return r
+	}
+
+	// TUIC - basic support
+	if strings.HasPrefix(link, "tuic://") {
+		link = strings.TrimPrefix(link, "tuic://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		// Format: uuid:password@host:port?congestion_control=...&alpn=...
+		p := strings.SplitN(link, "@", 2)
+		if len(p) != 2 { return "" }
+		up := strings.SplitN(p[0], ":", 2)
+		if len(up) != 2 { return "" }
+		uuid, password := up[0], up[1]
+		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
+		if len(hp) != 2 { return "" }
+		host, port := hp[0], hp[1]
+		var cc, alpn string
+		if strings.Contains(p[1], "?") {
+			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
+			cc = q.Get("congestion_control")
+			alpn = q.Get("alpn")
+		}
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: tuic\n    server: %s\n    port: %s\n    uuid: %s\n    password: %s\n", name, host, port, uuid, password)
+		if cc != "" {
+			r += fmt.Sprintf("    congestion-controller: %s\n", cc)
+		}
+		if alpn != "" {
+			r += fmt.Sprintf("    alpn:\n      - %s\n", alpn)
+		}
+		return r
+	}
+
+	// SSH - basic support
+	if strings.HasPrefix(link, "ssh://") {
+		link = strings.TrimPrefix(link, "ssh://")
+		if strings.Contains(link, "#") {
+			link = strings.SplitN(link, "#", 2)[0]
+		}
+		// Format: user@host:port?privateKey=...
+		p := strings.SplitN(link, "@", 2)
+		if len(p) != 2 { return "" }
+		user := p[0]
+		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
+		if len(hp) != 2 { return "" }
+		host, port := hp[0], hp[1]
+		var privateKey string
+		if strings.Contains(p[1], "?") {
+			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
+			privateKey = q.Get("privateKey")
+		}
+		r := fmt.Sprintf("  - name: \"%s\"\n    type: ssh\n    server: %s\n    port: %s\n    username: %s\n", name, host, port, user)
+		if privateKey != "" {
+			r += fmt.Sprintf("    private-key: %s\n", privateKey)
+		}
+		return r
+	}
+
 	return ""
 }
