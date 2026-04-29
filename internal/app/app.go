@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -73,6 +74,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tui.MsgRefresh:
+		if msg.Traffic != "" || msg.Expiry != "" {
+			if m.settings.ActiveSubIdx >= 0 && m.settings.ActiveSubIdx < len(m.settings.Subscriptions) {
+				m.settings.Subscriptions[m.settings.ActiveSubIdx].Traffic = msg.Traffic
+				m.settings.Subscriptions[m.settings.ActiveSubIdx].Expiry = msg.Expiry
+				m.settings.Subscriptions[m.settings.ActiveSubIdx].LastUpdate = time.Now()
+				settings.Save(m.settings)
+			}
+		}
 		m.running = true
 		cmd := m.nodes.Update(msg)
 		return m, cmd
@@ -484,14 +493,14 @@ func (m Model) switchSubscription() tea.Cmd {
 		if sub == nil {
 			return tui.MsgLogLine("No subscription")
 		}
-		_, _, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
+		_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
 			return tui.MsgLogLine("Error: " + err.Error())
 		}
 		m.core.Start()
 		proxy.SetSystemProxy()
 		m.running = true
-		return tui.MsgRefresh{}
+		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
 }
 
@@ -507,11 +516,11 @@ func (m Model) toggleCore() tea.Cmd {
 			if sub == nil {
 				return tui.MsgLogLine("Error: no subscription, press c to import")
 			}
-			_, _, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
+			_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 			if err != nil {
 				return tui.MsgLogLine("Error: " + err.Error())
 			}
-			return tui.MsgLogLine("Subscription updated")
+			return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 		},
 		func() tea.Msg {
 			if !m.core.IsInstalled() {
@@ -524,9 +533,6 @@ func (m Model) toggleCore() tea.Cmd {
 			}
 			proxy.SetSystemProxy()
 			return tui.MsgLogLine("Core started, proxy enabled")
-		},
-		func() tea.Msg {
-			return tui.MsgRefresh{}
 		},
 	)
 }
@@ -555,7 +561,7 @@ func (m Model) importFromClipboard() tea.Cmd {
 func (m Model) downloadSub(name, url string) tea.Cmd {
 	return func() tea.Msg {
 		m.logs.AddLine("Downloading: " + url)
-		_, _, err := clash.DownloadSubscription(url, m.settings.ProxyPort, m.settings.APIPort)
+		_, info, err := clash.DownloadSubscription(url, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
 			m.logs.AddLine("Error: " + err.Error())
 			m.err = err.Error()
@@ -577,6 +583,6 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 		m.logs.AddLine("Core started")
 
 		m.err = ""
-		return tui.MsgRefresh{}
+		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
 }

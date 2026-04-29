@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,77 @@ func getCoreDownloadURL() string {
 type SubscriptionInfo struct {
 	Traffic string
 	Expiry  string
+}
+
+func parseSubscriptionInfo(urlStr string, headers http.Header) SubscriptionInfo {
+	info := SubscriptionInfo{}
+
+	u, err := url.Parse(urlStr)
+	if err == nil && u.Fragment != "" {
+		fragment := u.Fragment
+
+		if strings.Contains(fragment, "流量") {
+			parts := strings.Split(fragment, "|")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "流量:") || strings.HasPrefix(p, "流量=") {
+					info.Traffic = strings.TrimPrefix(strings.TrimPrefix(p, "流量:"), "流量=")
+				}
+				if strings.Contains(p, "过期") || strings.Contains(p, "到期") {
+					info.Expiry = strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(p, "过期:"), "过期="), "到期:")
+					info.Expiry = strings.TrimPrefix(info.Expiry, "到期=")
+				}
+			}
+		}
+
+		if strings.Contains(fragment, "traffic") {
+			params := strings.Split(fragment, "&")
+			for _, p := range params {
+				if strings.HasPrefix(p, "traffic=") {
+					info.Traffic = strings.TrimPrefix(p, "traffic=")
+				}
+				if strings.HasPrefix(p, "expire=") || strings.HasPrefix(p, "expiry=") {
+					info.Expiry = strings.TrimPrefix(strings.TrimPrefix(p, "expire="), "expiry=")
+				}
+			}
+		}
+	}
+
+	userInfo := headers.Get("subscription-userinfo")
+	if userInfo != "" {
+		var upload, download, total int64
+		var expire int64
+
+		parts := strings.Split(userInfo, ";")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if strings.HasPrefix(p, "upload=") {
+				upload, _ = strconv.ParseInt(strings.TrimPrefix(p, "upload="), 10, 64)
+			}
+			if strings.HasPrefix(p, "download=") {
+				download, _ = strconv.ParseInt(strings.TrimPrefix(p, "download="), 10, 64)
+			}
+			if strings.HasPrefix(p, "total=") {
+				total, _ = strconv.ParseInt(strings.TrimPrefix(p, "total="), 10, 64)
+			}
+			if strings.HasPrefix(p, "expire=") {
+				expire, _ = strconv.ParseInt(strings.TrimPrefix(p, "expire="), 10, 64)
+			}
+		}
+
+		if total > 0 {
+			used := upload + download
+			usedGB := used / 1024 / 1024 / 1024
+			totalGB := total / 1024 / 1024 / 1024
+			info.Traffic = fmt.Sprintf("%dGB/%dGB", usedGB, totalGB)
+		}
+
+		if expire > 0 {
+			info.Expiry = time.Unix(expire, 0).Format("2006-01-02")
+		}
+	}
+
+	return info
 }
 
 type Core struct{}
@@ -211,10 +283,12 @@ func DownloadSubscription(subURL string, proxyPort, apiPort int) ([]byte, Subscr
 		}
 	}
 
+	info := parseSubscriptionInfo(subURL, resp.Header)
+
 	configData := []byte(buildConfig(nodes, proxyPort, apiPort))
 	if err := config.SaveConfig(configData); err != nil { return nil, SubscriptionInfo{}, err }
 	if err := config.SaveSubscription(subURL); err != nil { return nil, SubscriptionInfo{}, err }
-	return data, SubscriptionInfo{}, nil
+	return data, info, nil
 }
 
 func buildConfig(nodes []string, proxyPort, apiPort int) string {

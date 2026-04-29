@@ -30,7 +30,10 @@ type MsgDelayTested struct {
 	Index int
 	Delay int
 }
-type MsgRefresh struct{}
+type MsgRefresh struct {
+	Traffic string
+	Expiry  string
+}
 type MsgRetryLoad struct{}
 type MsgTestProgress struct {
 	Index int
