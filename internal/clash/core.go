@@ -349,7 +349,53 @@ func isValidNodeLink(link string) bool {
 		strings.HasPrefix(link, "ssr://") ||
 		strings.HasPrefix(link, "hysteria2://") ||
 		strings.HasPrefix(link, "hy2://") ||
-		strings.HasPrefix(link, "hysteria://")
+		strings.HasPrefix(link, "hysteria://") ||
+		strings.HasPrefix(link, "socks5://") ||
+		strings.HasPrefix(link, "socks://") ||
+		strings.HasPrefix(link, "http://") ||
+		strings.HasPrefix(link, "https://") ||
+		strings.HasPrefix(link, "wireguard://") ||
+		strings.HasPrefix(link, "tuic://") ||
+		strings.HasPrefix(link, "ssh://")
+}
+
+// ContainsNodeLinks 检查内容是否包含节点链接
+func ContainsNodeLinks(content string) bool {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if isValidNodeLink(line) {
+			return true
+		}
+	}
+	// 也检查 base64 编码的内容
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(content))
+	if err == nil {
+		for _, line := range strings.Split(string(decoded), "\n") {
+			if isValidNodeLink(strings.TrimSpace(line)) {
+				return true
+			}
+		}
+	}
+	decodedRaw, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(content))
+	if err == nil {
+		for _, line := range strings.Split(string(decodedRaw), "\n") {
+			if isValidNodeLink(strings.TrimSpace(line)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ParseNodeLinks 从内容中解析节点链接
+func ParseNodeLinks(content string) []string {
+	return parseSubscriptionContent(content)
+}
+
+// BuildConfigFromNodes 从节点链接构建配置文件
+func BuildConfigFromNodes(nodes []string, proxyPort, apiPort int) string {
+	return buildConfig(nodes, proxyPort, apiPort)
 }
 
 func buildConfig(nodes []string, proxyPort, apiPort int) string {

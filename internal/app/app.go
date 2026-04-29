@@ -13,6 +13,7 @@ import (
 
 	"clashtui/internal/clash"
 	"clashtui/internal/clipboard"
+	"clashtui/internal/config"
 	"clashtui/internal/proxy"
 	"clashtui/internal/settings"
 	"clashtui/internal/tui"
@@ -318,17 +319,14 @@ func (m Model) handleInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "c":
-		if m.inputMode == "url" {
-			url, err := clipboard.Read()
+		// 从剪贴板导入
+		if m.inputMode == "url" || m.inputMode == "nodes" {
+			content, err := clipboard.Read()
 			if err != nil {
 				m.err = "clipboard: " + err.Error()
 				return m, nil
 			}
-			if len(url) < 4 || url[:4] != "http" {
-				m.err = "no valid URL in clipboard"
-				return m, nil
-			}
-			m.inputBuf = url
+			m.inputBuf = content
 			m.err = ""
 			return m, nil
 		}
@@ -346,37 +344,68 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 	switch m.inputMode {
 	case "add_type":
 		if m.inputBuf == "1" {
+			// 订阅 - 输入 URL
 			m.addType = "subscription"
 			m.inputMode = "url"
 			m.inputBuf = ""
 			return m, nil
 		} else if m.inputBuf == "2" {
+			// 订阅 - 从剪贴板
 			m.addType = "subscription"
-			url, err := clipboard.Read()
+			content, err := clipboard.Read()
 			if err != nil {
 				m.err = "clipboard: " + err.Error()
 				m.inputMode = ""
 				return m, nil
 			}
-			if len(url) < 4 || url[:4] != "http" {
-				m.err = "no valid URL in clipboard"
+			// 检查是否是订阅 URL
+			if strings.HasPrefix(content, "http://") || strings.HasPrefix(content, "https://") {
+				m.urlBuf = content
+				m.inputMode = "name"
+				m.inputBuf = ""
+				m.err = ""
+				return m, nil
+			}
+			m.err = "clipboard is not a subscription URL"
+			m.inputMode = ""
+			return m, nil
+		} else if m.inputBuf == "3" {
+			// 节点 - 输入链接
+			m.addType = "nodes"
+			m.inputMode = "nodes"
+			m.inputBuf = ""
+			return m, nil
+		} else if m.inputBuf == "4" {
+			// 节点 - 从剪贴板
+			m.addType = "nodes"
+			content, err := clipboard.Read()
+			if err != nil {
+				m.err = "clipboard: " + err.Error()
 				m.inputMode = ""
 				return m, nil
 			}
-			m.urlBuf = url
-			m.inputMode = "name"
-			m.inputBuf = ""
-			m.err = ""
-			return m, nil
-		} else if m.inputBuf == "3" {
-			m.addType = "manual"
-			m.inputMode = "name"
-			m.inputBuf = ""
+			// 检查剪贴板是否包含节点链接
+			if clash.ContainsNodeLinks(content) {
+				m.urlBuf = content
+				m.inputMode = "name"
+				m.inputBuf = ""
+				m.err = ""
+				return m, nil
+			}
+			m.err = "clipboard contains no valid node links"
+			m.inputMode = ""
 			return m, nil
 		}
 		m.inputMode = ""
 		return m, nil
 	case "url":
+		// 订阅 URL 输入完成
+		m.urlBuf = m.inputBuf
+		m.inputMode = "name"
+		m.inputBuf = ""
+		return m, nil
+	case "nodes":
+		// 节点链接输入完成
 		m.urlBuf = m.inputBuf
 		m.inputMode = "name"
 		m.inputBuf = ""
@@ -388,11 +417,17 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 		}
 		if m.addType == "subscription" {
 			settings.AddSubscription(&m.settings, name, m.urlBuf)
-			m.logs.AddLine("Added subscription: " + name)
+			m.logs.AddLine("→ Added subscription: " + name)
 			m.inputMode = ""
 			m.inputBuf = ""
 			m.urlBuf = ""
 			return m, m.downloadSub(name, m.urlBuf)
+		} else if m.addType == "nodes" {
+			// 导入节点链接
+			m.logs.AddLine("→ Importing nodes...")
+			m.inputMode = ""
+			m.inputBuf = ""
+			return m, m.importNodes(name, m.urlBuf)
 		}
 		m.inputMode = ""
 		m.inputBuf = ""
@@ -468,9 +503,11 @@ func (m Model) View() string {
 func (m Model) renderInputMode() string {
 	switch m.inputMode {
 	case "add_type":
-		return fmt.Sprintf("\n  Add new:\n  [1] Subscription - type URL\n  [2] Subscription - paste from clipboard\n  [3] Manual (nodes)\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Add new:\n  [1] Subscription - type URL\n  [2] Subscription - paste from clipboard\n  [3] Nodes - type links (supports multiple)\n  [4] Nodes - paste from clipboard\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
 	case "url":
-		return fmt.Sprintf("\n  Enter subscription URL:\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Enter subscription URL (http/https):\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
+	case "nodes":
+		return fmt.Sprintf("\n  Enter node links (supports multiple lines):\n  Supported: trojan://, vless://, vmess://, ss://, hysteria2://, hy2://, socks5://, wireguard://, tuic://\n\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
 	case "name":
 		return fmt.Sprintf("\n  Enter name:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
 	case "proxy_port":
@@ -694,5 +731,50 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 
 		m.err = ""
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
+	}
+}
+
+// importNodes 导入节点链接（支持多行）
+func (m Model) importNodes(name, content string) tea.Cmd {
+	return func() tea.Msg {
+		m.logs.AddLine("→ Parsing node links...")
+
+		// 解析节点链接
+		nodes := clash.ParseNodeLinks(content)
+		if len(nodes) == 0 {
+			m.logs.AddLine("⚠ No valid node links found")
+			m.err = "no valid node links"
+			return nil
+		}
+
+		m.logs.AddLine(fmt.Sprintf("→ Found %d nodes", len(nodes)))
+
+		// 保存为本地订阅（URL 为空，表示手动添加）
+		settings.AddSubscription(&m.settings, name, "")
+		m.settings.Subscriptions[len(m.settings.Subscriptions)-1].Traffic = fmt.Sprintf("%d nodes", len(nodes))
+		settings.Save(m.settings)
+
+		// 构建配置
+		configData := clash.BuildConfigFromNodes(nodes, m.settings.ProxyPort, m.settings.APIPort)
+		if err := config.SaveConfig([]byte(configData)); err != nil {
+			m.logs.AddLine("⚠ Error: " + err.Error())
+			return nil
+		}
+
+		m.logs.AddLine("→ Config saved")
+
+		if !m.core.IsInstalled() {
+			m.logs.AddLine("→ Installing core...")
+			m.core.Install()
+			m.core.DownloadGeoData()
+		}
+
+		m.core.Stop()
+		m.core.Start()
+		proxy.SetSystemProxy()
+		m.running = true
+		m.logs.AddLine("✓ Core started with imported nodes")
+
+		return tui.MsgRefresh{}
 	}
 }

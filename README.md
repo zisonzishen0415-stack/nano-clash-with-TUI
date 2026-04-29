@@ -13,12 +13,23 @@
 
 ## 支持协议
 
-- Trojan
-- VLESS
-- VMess
-- Shadowsocks (ss)
-- Hysteria2 / hy2
-- Hysteria
+**节点链接格式：**
+- Trojan (`trojan://`)
+- VLESS (`vless://`)
+- VMess (`vmess://`)
+- Shadowsocks (`ss://`)
+- ShadowsocksR (`ssr://`)
+- Hysteria2 (`hysteria2://`, `hy2://`)
+- Hysteria (`hysteria://`)
+- SOCKS5 (`socks5://`, `socks://`)
+- HTTP/HTTPS (`http://`, `https://`)
+- WireGuard (`wireguard://`)
+- TUIC (`tuic://`)
+- SSH (`ssh://`)
+
+**订阅格式：**
+- HTTP/HTTPS URL（自动解析 base64 或 YAML）
+- Clash YAML 配置文件
 
 ## 安装
 
@@ -132,14 +143,28 @@ cp clashtui ~/.local/bin/
 
 ## 使用流程
 
+### 导入订阅
+
 1. 运行 `clashtui` 打开界面
 2. 按 `2` 进入 Config 标签页
-3. 按 `c` 从剪贴板导入订阅链接（或按 `s` 手动输入）
-4. 输入订阅名称后保存
-5. 按 `enter` 激活订阅（或按 `r` 全局启动）
-6. 按 `1` 返回 Nodes 标签页
-7. 使用 `j/k` 选择节点，`enter` 切换
-8. 按 `T` 测试所有节点延迟，自动选择最快（如果启用）
+3. 选择 `[+] Add subscription/nodes`，按 `enter`
+4. 选择导入方式：
+   - `[1]` 订阅 - 手动输入 URL
+   - `[2]` 订阅 - 从剪贴板导入 URL
+   - `[3]` 节点 - 手动输入链接（支持多行）
+   - `[4]` 节点 - 从剪贴板导入链接
+5. 输入订阅/节点名称后保存
+6. 按 `enter` 激活订阅，或按 `r` 全局启动
+
+### 快捷导入
+
+- 按 `c`：直接从剪贴板导入（自动识别订阅 URL 或节点链接）
+
+### 使用代理
+
+1. 按 `1` 返回 Nodes 标签页
+2. 使用 `j/k` 选择节点，`enter` 切换
+3. 按 `T` 测试所有节点延迟，自动选择最快（如果启用）
 
 ## 安全退出
 
