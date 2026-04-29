@@ -14,13 +14,13 @@ import (
 	"clashtui/internal/clash"
 	"clashtui/internal/config"
 	"clashtui/internal/proxy"
+	"clashtui/internal/settings"
 	"clashtui/internal/singleinstance"
 )
 
 func main() {
 	args := os.Args[1:]
 
-	// 启动时检查：如果 clash 没运行，清除代理设置（解决关机后遗留问题）
 	cleanStaleProxySettings()
 
 	if len(args) > 0 {
@@ -43,18 +43,23 @@ func main() {
 	runTUI()
 }
 
-// cleanStaleProxySettings 检查 clash 是否运行，如果没运行就清除代理设置
+func getAPIPort() int {
+	s := settings.Load()
+	if s.APIPort == 0 {
+		return 9090
+	}
+	return s.APIPort
+}
+
 func cleanStaleProxySettings() {
-	client := clash.NewClient()
+	client := clash.NewClient(getAPIPort())
 	if !client.IsConnected() {
-		// clash 没运行，清除可能遗留的代理设置
 		proxy.UnsetSystemProxy()
 	}
 }
 
 func printStatus() {
-	// 直接查询 Clash API，获取真实状态
-	client := clash.NewClient()
+	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
 
 	status := map[string]string{
@@ -88,7 +93,6 @@ func runDaemon() {
 	defer singleinstance.Release()
 	defer cleanupOnExit()
 
-	// Start clash if config exists
 	if config.Exists() {
 		core := clash.NewCore()
 		if !core.IsInstalled() {
@@ -99,7 +103,6 @@ func runDaemon() {
 		proxy.SetSystemProxy()
 	}
 
-	// Wait for termination signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	<-sigCh
@@ -116,10 +119,8 @@ func runTUI() {
 	}
 
 	defer singleinstance.Release()
-	// TUI 退出时不清理 clash - 让服务继续运行
 
-	// Only stop clash if API is not responding (truly leftover zombie process)
-	client := clash.NewClient()
+	client := clash.NewClient(getAPIPort())
 	if !client.IsConnected() {
 		core := clash.NewCore()
 		core.Stop()
@@ -133,22 +134,18 @@ func runTUI() {
 }
 
 func stopAll() {
-	// First, try to send SIGTERM to daemon process
 	daemonPid, err := singleinstance.ReadPID()
 	if err == nil && daemonPid > 0 {
 		process, _ := os.FindProcess(daemonPid)
-		// Send SIGTERM to daemon, it will cleanup properly via defer
 		process.Signal(syscall.SIGTERM)
-		// Wait for process to exit (poll since Wait() only works for children)
 		for i := 0; i < 10; i++ {
 			if process.Signal(syscall.Signal(0)) != nil {
-				break // Process exited
+				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
-	// Fallback: directly stop clash (if daemon not running)
 	core := clash.NewCore()
 	core.Stop()
 	proxy.UnsetSystemProxy()
@@ -156,7 +153,7 @@ func stopAll() {
 }
 
 func toggleProxy() {
-	client := clash.NewClient()
+	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
 
 	if connected {

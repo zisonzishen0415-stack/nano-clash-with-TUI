@@ -5,12 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"clashtui/internal/clash"
 	"clashtui/internal/clipboard"
-	"clashtui/internal/config"
 	"clashtui/internal/proxy"
 	"clashtui/internal/settings"
 	"clashtui/internal/tui"
@@ -24,18 +25,21 @@ type Model struct {
 	client    *clash.Client
 	running   bool
 	err       string
-	subInput  bool
-	subURL    string
 	settings  settings.Settings
-	setIdx    int // settings menu index
+	cursorIdx int
+	inputMode string
+	inputBuf  string
+	addType   string
+	urlBuf    string
 }
 
 func New() Model {
-	client := clash.NewClient()
+	s := settings.Load()
+	client := clash.NewClient(s.APIPort)
 	core := clash.NewCore()
 	nodes := tui.NewNodesModel(client)
+	nodes.SetAutoSelectBest(s.AutoSelectBest)
 	logs := tui.NewLogsModel()
-	s := settings.Load()
 
 	running := client.IsConnected()
 
@@ -55,8 +59,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.subInput {
-		return m.handleSubInput(msg)
+	if m.inputMode != "" {
+		return m.handleInputMode(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -76,7 +80,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		k := msg.String()
 
-		// Tab switching
 		switch k {
 		case "h", "left":
 			if m.tab > 0 {
@@ -99,7 +102,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Global keys
 		switch k {
 		case "x":
 			m.core.Stop()
@@ -107,8 +109,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.running = false
 			return m, func() tea.Msg { return tui.MsgLogLine("Stopped core, proxy disabled") }
 		case "s":
-			m.subInput = true
-			m.subURL = ""
+			m.addType = "subscription"
+			m.inputMode = "url"
+			m.inputBuf = ""
+			m.urlBuf = ""
 			return m, nil
 		case "c":
 			return m, m.importFromClipboard()
@@ -118,46 +122,119 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Tab-specific keys
 		if m.tab == 0 {
 			cmd := m.nodes.Update(msg)
 			return m, cmd
 		}
 
 		if m.tab == 1 {
-			return m.handleSettingsKeys(k)
+			return m.handleConfigKeys(msg)
 		}
 	}
 
 	return m, nil
 }
 
-func (m Model) handleSettingsKeys(k string) (tea.Model, tea.Cmd) {
+func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k := msg.String()
+	totalRows := len(m.settings.Subscriptions) + 1 + 1 + 3 + 1 + 2
+
 	switch k {
 	case "j", "down":
-		if m.setIdx < 4 {
-			m.setIdx++
+		if m.cursorIdx < totalRows-1 {
+			m.cursorIdx++
 		}
 		return m, nil
 	case "k", "up":
-		if m.setIdx > 0 {
-			m.setIdx--
+		if m.cursorIdx > 0 {
+			m.cursorIdx--
 		}
 		return m, nil
-	case "enter", " ":
-		switch m.setIdx {
+	case "enter":
+		return m.handleConfigEnter()
+	case "d":
+		if m.cursorIdx < len(m.settings.Subscriptions) {
+			settings.RemoveSubscription(&m.settings, m.cursorIdx)
+			if m.cursorIdx >= len(m.settings.Subscriptions) && len(m.settings.Subscriptions) > 0 {
+				m.cursorIdx = len(m.settings.Subscriptions)
+			}
+			return m, func() tea.Msg { return tui.MsgLogLine("Deleted subscription") }
+		}
+		return m, nil
+	case "D":
+		m.settings.Subscriptions = []settings.Subscription{}
+		m.settings.ActiveSubIdx = 0
+		settings.Save(m.settings)
+		m.cursorIdx = 0
+		return m, func() tea.Msg { return tui.MsgLogLine("Deleted all subscriptions") }
+	}
+	return m, nil
+}
+
+func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
+	row := m.cursorIdx
+
+	if row < len(m.settings.Subscriptions) {
+		if row != m.settings.ActiveSubIdx {
+			settings.SwitchSubscription(&m.settings, row)
+			return m, m.switchSubscription()
+		}
+		return m, nil
+	}
+
+	addRow := len(m.settings.Subscriptions)
+	if row == addRow {
+		m.inputMode = "add_type"
+		m.inputBuf = ""
+		return m, nil
+	}
+
+	settingsStart := addRow + 2
+	settingsIdx := row - settingsStart
+
+	if settingsIdx >= 0 && settingsIdx < 3 {
+		switch settingsIdx {
 		case 0:
 			m.settings.AutoStart = !m.settings.AutoStart
 			settings.Save(m.settings)
-			// Enable/disable systemd service
-			home, _ := os.UserHomeDir()
-			serviceDir := filepath.Join(home, ".config", "systemd", "user")
-			serviceFile := filepath.Join(serviceDir, "clashtui.service")
+			return m.handleAutoStartToggle()
+		case 1:
+			m.settings.AutoTestDelay = !m.settings.AutoTestDelay
+			settings.Save(m.settings)
+			return m, nil
+		case 2:
+			m.settings.AutoSelectBest = !m.settings.AutoSelectBest
+			settings.Save(m.settings)
+			m.nodes.SetAutoSelectBest(m.settings.AutoSelectBest)
+			return m, nil
+		}
+	}
 
-			if m.settings.AutoStart {
-				// Create directory and write service file
-				os.MkdirAll(serviceDir, 0755)
-				serviceContent := `[Unit]
+	portsStart := settingsStart + 3 + 1
+	portIdx := row - portsStart
+
+	if portIdx == 0 {
+		m.inputMode = "proxy_port"
+		m.inputBuf = fmt.Sprintf("%d", m.settings.ProxyPort)
+		return m, nil
+	}
+	if portIdx == 1 {
+		m.inputMode = "api_port"
+		m.inputBuf = fmt.Sprintf("%d", m.settings.APIPort)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m Model) handleAutoStartToggle() (tea.Model, tea.Cmd) {
+	home, _ := os.UserHomeDir()
+	serviceDir := filepath.Join(home, ".config", "systemd", "user")
+	serviceFile := filepath.Join(serviceDir, "clashtui.service")
+
+	if m.settings.AutoStart {
+		os.MkdirAll(serviceDir, 0755)
+		serviceContent := `[Unit]
 Description=ClashTUI - Clash proxy manager
 After=network.target
 
@@ -168,56 +245,102 @@ Restart=on-failure
 
 [Install]
 WantedBy=default.target`
-				os.WriteFile(serviceFile, []byte(serviceContent), 0644)
-				exec.Command("systemctl", "--user", "enable", "clashtui.service").Run()
-				exec.Command("systemctl", "--user", "daemon-reload").Run()
-				return m, func() tea.Msg { return tui.MsgLogLine("Auto start enabled") }
-			} else {
-				exec.Command("systemctl", "--user", "disable", "clashtui.service").Run()
-				os.Remove(serviceFile)
-				exec.Command("systemctl", "--user", "daemon-reload").Run()
-				return m, func() tea.Msg { return tui.MsgLogLine("Auto start disabled") }
-			}
-		case 1:
-			m.settings.AutoTestDelay = !m.settings.AutoTestDelay
-			settings.Save(m.settings)
-			return m, nil
-		case 2:
-			m.settings.AutoSelectBest = !m.settings.AutoSelectBest
-			settings.Save(m.settings)
-			return m, nil
-		}
+		os.WriteFile(serviceFile, []byte(serviceContent), 0644)
+		exec.Command("systemctl", "--user", "enable", "clashtui.service").Run()
+		exec.Command("systemctl", "--user", "daemon-reload").Run()
+		return m, func() tea.Msg { return tui.MsgLogLine("Auto start enabled") }
 	}
-	return m, nil
+	exec.Command("systemctl", "--user", "disable", "clashtui.service").Run()
+	os.Remove(serviceFile)
+	exec.Command("systemctl", "--user", "daemon-reload").Run()
+	return m, func() tea.Msg { return tui.MsgLogLine("Auto start disabled") }
 }
 
-func (m Model) handleSubInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		k := msg.String()
-		switch k {
-		case "enter":
-			m.subInput = false
-			if m.subURL != "" {
-				return m, m.downloadSub(m.subURL)
-			}
+func (m Model) handleInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	k := keyMsg.String()
+
+	switch k {
+	case "enter":
+		return m.finishInputMode()
+	case "esc":
+		m.inputMode = ""
+		m.inputBuf = ""
+		m.urlBuf = ""
+		return m, nil
+	case "backspace":
+		if len(m.inputBuf) > 0 {
+			m.inputBuf = m.inputBuf[:len(m.inputBuf)-1]
+		}
+		return m, nil
+	default:
+		if len(k) == 1 {
+			m.inputBuf += k
+		}
+		return m, nil
+	}
+}
+
+func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
+	switch m.inputMode {
+	case "add_type":
+		if m.inputBuf == "1" {
+			m.addType = "subscription"
+			m.inputMode = "url"
+			m.inputBuf = ""
 			return m, nil
-		case "esc":
-			m.subInput = false
-			m.subURL = ""
-			return m, nil
-		case "backspace":
-			if len(m.subURL) > 0 {
-				m.subURL = m.subURL[:len(m.subURL)-1]
-			}
-			return m, nil
-		default:
-			if len(k) == 1 {
-				m.subURL += k
-			}
+		} else if m.inputBuf == "2" {
+			m.addType = "manual"
+			m.inputMode = "name"
+			m.inputBuf = ""
 			return m, nil
 		}
+		m.inputMode = ""
+		return m, nil
+	case "url":
+		m.urlBuf = m.inputBuf
+		m.inputMode = "name"
+		m.inputBuf = ""
+		return m, nil
+	case "name":
+		name := m.inputBuf
+		if name == "" {
+			name = "Subscription"
+		}
+		if m.addType == "subscription" {
+			settings.AddSubscription(&m.settings, name, m.urlBuf)
+			m.logs.AddLine("Added subscription: " + name)
+			m.inputMode = ""
+			m.inputBuf = ""
+			m.urlBuf = ""
+			return m, m.downloadSub(name, m.urlBuf)
+		}
+		m.inputMode = ""
+		m.inputBuf = ""
+		m.urlBuf = ""
+		return m, nil
+	case "proxy_port":
+		port, err := strconv.Atoi(m.inputBuf)
+		if err == nil && port > 0 && port <= 65535 {
+			m.settings.ProxyPort = port
+			settings.Save(m.settings)
+		}
+		m.inputMode = ""
+		return m, nil
+	case "api_port":
+		port, err := strconv.Atoi(m.inputBuf)
+		if err == nil && port > 0 && port <= 65535 {
+			m.settings.APIPort = port
+			settings.Save(m.settings)
+			m.client = clash.NewClient(port)
+		}
+		m.inputMode = ""
+		return m, nil
 	}
+	m.inputMode = ""
 	return m, nil
 }
 
@@ -246,8 +369,8 @@ func (m Model) View() string {
 		content = m.logs.View()
 	}
 
-	if m.subInput {
-		content = fmt.Sprintf("\n  Enter subscription URL:\n  > %s\n\n  enter: submit | esc: cancel", m.subURL)
+	if m.inputMode != "" {
+		content = m.renderInputMode()
 	}
 
 	status := fmt.Sprintf("\n\n  Core: %s | Current: %s",
@@ -262,41 +385,89 @@ func (m Model) View() string {
 	return tabs + "\n" + content + status + tui.Help.Render(help)
 }
 
+func (m Model) renderInputMode() string {
+	switch m.inputMode {
+	case "add_type":
+		return fmt.Sprintf("\n  Add new:\n  [1] Subscription (URL)\n  [2] Manual (nodes)\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
+	case "url":
+		return fmt.Sprintf("\n  Enter subscription URL:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
+	case "name":
+		return fmt.Sprintf("\n  Enter name:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
+	case "proxy_port":
+		return fmt.Sprintf("\n  Enter proxy port:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
+	case "api_port":
+		return fmt.Sprintf("\n  Enter API port:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
+	}
+	return ""
+}
+
 func (m Model) configView() string {
-	s := "\n"
-	sub, err := config.LoadSubscription()
-	if err != nil {
-		s += "  Subscription: none\n\n"
-	} else {
-		s += "  Subscription: " + sub + "\n\n"
-	}
+	var b strings.Builder
+	b.WriteString("\n  Subscriptions:\n")
 
-	// Settings menu
-	opts := []struct {
-		name  string
-		value bool
-	}{
-		{"Auto start on boot", m.settings.AutoStart},
-		{"Auto test delay", m.settings.AutoTestDelay},
-		{"Auto select fastest", m.settings.AutoSelectBest},
-	}
-
-	s += "  Settings:\n"
-	for i, opt := range opts {
+	for i, sub := range m.settings.Subscriptions {
 		prefix := "  "
-		if i == m.setIdx {
+		if i == m.cursorIdx {
+			prefix = "> "
+		}
+		style := tui.SubInactive
+		if i == m.settings.ActiveSubIdx {
+			style = tui.SubActive
+		}
+
+		name := style.Render(sub.Name)
+		traffic := "---"
+		if sub.Traffic != "" {
+			traffic = sub.Traffic
+		}
+		b.WriteString(fmt.Sprintf("%s[%d] %s  %s\n", prefix, i+1, name, traffic))
+	}
+
+	addRow := len(m.settings.Subscriptions)
+	prefix := "  "
+	if m.cursorIdx == addRow {
+		prefix = "> "
+	}
+	b.WriteString(fmt.Sprintf("%s[+] Add subscription/nodes\n", prefix))
+
+	b.WriteString("\n  Settings:\n")
+
+	settingsStart := addRow + 1
+	opts := []string{"Auto start on boot", "Auto test delay", "Auto select fastest"}
+	values := []bool{m.settings.AutoStart, m.settings.AutoTestDelay, m.settings.AutoSelectBest}
+
+	for i, opt := range opts {
+		row := settingsStart + i
+		prefix := "  "
+		if m.cursorIdx == row {
 			prefix = "> "
 		}
 		check := "[ ]"
-		if opt.value {
+		if values[i] {
 			check = "[x]"
 		}
-		s += fmt.Sprintf("%s%s %s\n", prefix, check, opt.name)
+		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, check, opt))
 	}
 
-	s += "\n  j/k: select | enter: toggle\n"
-	s += "  c: import clipboard | s: enter URL | r: refresh\n"
-	return s
+	portsStart := settingsStart + 3
+	b.WriteString("\n  Ports:\n")
+
+	proxyPrefix := "  "
+	if m.cursorIdx == portsStart {
+		proxyPrefix = "> "
+	}
+	b.WriteString(fmt.Sprintf("%sProxy: %d\n", proxyPrefix, m.settings.ProxyPort))
+
+	apiPrefix := "  "
+	if m.cursorIdx == portsStart+1 {
+		apiPrefix = "> "
+	}
+	b.WriteString(fmt.Sprintf("%sAPI: %d\n", apiPrefix, m.settings.APIPort))
+
+	b.WriteString("\n  j/k: navigate | enter: action | d: delete | D: delete all\n")
+	b.WriteString("  c: import clipboard | r: refresh\n")
+
+	return b.String()
 }
 
 func (m Model) coreStatus() string {
@@ -304,6 +475,24 @@ func (m Model) coreStatus() string {
 		return tui.StatusOK.Render("running")
 	}
 	return tui.StatusErr.Render("stopped")
+}
+
+func (m Model) switchSubscription() tea.Cmd {
+	return func() tea.Msg {
+		m.core.Stop()
+		sub := settings.GetActiveSubscription(m.settings)
+		if sub == nil {
+			return tui.MsgLogLine("No subscription")
+		}
+		_, _, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
+		if err != nil {
+			return tui.MsgLogLine("Error: " + err.Error())
+		}
+		m.core.Start()
+		proxy.SetSystemProxy()
+		m.running = true
+		return tui.MsgRefresh{}
+	}
 }
 
 func (m Model) toggleCore() tea.Cmd {
@@ -314,11 +503,11 @@ func (m Model) toggleCore() tea.Cmd {
 			return tui.MsgLogLine("Stopped existing core")
 		},
 		func() tea.Msg {
-			sub, err := config.LoadSubscription()
-			if err != nil || sub == "" {
+			sub := settings.GetActiveSubscription(m.settings)
+			if sub == nil {
 				return tui.MsgLogLine("Error: no subscription, press c to import")
 			}
-			_, err = clash.DownloadSubscription(sub)
+			_, _, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 			if err != nil {
 				return tui.MsgLogLine("Error: " + err.Error())
 			}
@@ -354,14 +543,19 @@ func (m Model) importFromClipboard() tea.Cmd {
 			return nil
 		}
 
-		return m.downloadSub(url)()
+		m.addType = "subscription"
+		m.urlBuf = url
+		m.inputMode = "name"
+		m.inputBuf = ""
+		m.err = ""
+		return nil
 	}
 }
 
-func (m Model) downloadSub(url string) tea.Cmd {
+func (m Model) downloadSub(name, url string) tea.Cmd {
 	return func() tea.Msg {
 		m.logs.AddLine("Downloading: " + url)
-		_, err := clash.DownloadSubscription(url)
+		_, _, err := clash.DownloadSubscription(url, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
 			m.logs.AddLine("Error: " + err.Error())
 			m.err = err.Error()
