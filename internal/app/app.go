@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"clashtui/internal/clash"
 	"clashtui/internal/clipboard"
@@ -20,20 +21,23 @@ import (
 )
 
 type Model struct {
-	tab          int
-	nodes        tui.NodesModel
-	logs         *tui.LogsModel
-	core         *clash.Core
-	client       *clash.Client
-	running      bool
-	err          string
-	settings     settings.Settings
-	cursorIdx    int
-	inputMode    string
-	inputBuf     string
-	addType      string
-	urlBuf       string
+	tab           int
+	nodes         tui.NodesModel
+	logs          *tui.LogsModel
+	core          *clash.Core
+	client        *clash.Client
+	running       bool
+	err           string
+	settings      settings.Settings
+	cursorIdx     int
+	inputMode     string
+	inputBuf      string
+	addType       string
+	urlBuf        string
 	currentAction string  // 当前正在进行的操作
+	recentLogs    []string // 最近5条日志，右下角悬浮显示
+	width         int      // 终端宽度
+	height        int      // 终端高度
 }
 
 func New() Model {
@@ -61,13 +65,30 @@ func (m Model) Init() tea.Cmd {
 	return m.nodes.Init()
 }
 
+// addLog 添加日志到右下角悬浮栏和 Logs 标签页
+func (m *Model) addLog(line string) {
+	m.addLog(line)
+	m.recentLogs = append(m.recentLogs, line)
+	if len(m.recentLogs) > 5 {
+		m.recentLogs = m.recentLogs[len(m.recentLogs)-5:]
+	}
+}
+
 // startAction 记录操作开始状态并写入日志
 func (m *Model) startAction(action string) {
 	m.currentAction = action
-	m.logs.AddLine("→ " + action)
+	m.addLog("→ " + action)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// 处理窗口尺寸变化
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	}
+
 	if m.inputMode != "" {
 		return m.handleInputMode(msg)
 	}
@@ -76,12 +97,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.MsgProxiesLoaded:
 		cmd := m.nodes.Update(msg)
 		if len(msg) > 0 {
-			m.logs.AddLine(fmt.Sprintf("✓ Loaded %d proxies", len(msg)))
+			m.addLog(fmt.Sprintf("✓ Loaded %d proxies", len(msg)))
 		}
 		return m, cmd
 
 	case tui.MsgProxySwitched:
-		m.logs.AddLine(fmt.Sprintf("✓ Switched to: %s", string(msg)))
+		m.addLog(fmt.Sprintf("✓ Switched to: %s", string(msg)))
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
@@ -417,14 +438,14 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 		}
 		if m.addType == "subscription" {
 			settings.AddSubscription(&m.settings, name, m.urlBuf)
-			m.logs.AddLine("→ Added subscription: " + name)
+			m.addLog("→ Added subscription: " + name)
 			m.inputMode = ""
 			m.inputBuf = ""
 			m.urlBuf = ""
 			return m, m.downloadSub(name, m.urlBuf)
 		} else if m.addType == "nodes" {
 			// 导入节点链接
-			m.logs.AddLine("→ Importing nodes...")
+			m.addLog("→ Importing nodes...")
 			m.inputMode = ""
 			m.inputBuf = ""
 			return m, m.importNodes(name, m.urlBuf)
@@ -497,7 +518,59 @@ func (m Model) View() string {
 
 	help := "\n  1/2/3 or h/l: switch tabs | q: quit"
 
-	return tabs + "\n" + content + status + tui.Help.Render(help)
+	mainUI := tabs + "\n" + content + status + tui.Help.Render(help)
+
+	// 悬浮日志栏叠加在右下角
+	if m.width > 0 && m.height > 0 && len(m.recentLogs) > 0 {
+		floatingLogs := m.renderFloatingLogs()
+		// 使用 ANSI 定位叠加日志栏
+		// 计算日志栏高度
+		logHeight := len(m.recentLogs)
+		// 将日志栏定位到右下角
+		posX := m.width - 42
+		posY := m.height - logHeight - 1
+		if posX > 0 && posY > 0 {
+			// 使用 ANSI escape codes 定位
+			return mainUI + fmt.Sprintf("\x1b[%d;%dH%s", posY, posX, floatingLogs)
+		}
+	}
+
+	return mainUI
+}
+
+// renderFloatingLogs 渲染右下角悬浮日志栏
+func (m Model) renderFloatingLogs() string {
+	if len(m.recentLogs) == 0 {
+		return ""
+	}
+
+	logWidth := 40
+	styles := []lipgloss.Style{
+		tui.LogBright, tui.LogMedium, tui.LogDim, tui.LogFaint, tui.LogFade,
+	}
+
+	var lines []string
+	// 最新日志在最下面（倒序显示）
+	for i := len(m.recentLogs) - 1; i >= 0; i-- {
+		log := m.recentLogs[i]
+		styleIdx := len(m.recentLogs) - 1 - i
+		if styleIdx >= len(styles) {
+			styleIdx = len(styles) - 1
+		}
+		// 截断长日志
+		if len(log) > logWidth-4 {
+			log = log[:logWidth-6] + ".."
+		}
+		lines = append(lines, styles[styleIdx].Render(log))
+	}
+
+	logContent := strings.Join(lines, "\n")
+
+	return lipgloss.NewStyle().
+		Width(logWidth).
+		Align(lipgloss.Right).
+		Padding(0, 1).
+		Render(logContent)
 }
 
 func (m Model) renderInputMode() string {
@@ -597,7 +670,7 @@ func (m Model) coreStatus() string {
 func (m Model) switchSubscription() tea.Cmd {
 	return func() tea.Msg {
 		m.core.Stop()
-		m.logs.AddLine("Switching subscription...")
+		m.addLog("Switching subscription...")
 		
 		s := settings.Load()
 		sub := settings.GetActiveSubscription(s)
@@ -605,7 +678,7 @@ func (m Model) switchSubscription() tea.Cmd {
 			return tui.MsgLogLine("No subscription")
 		}
 		
-		m.logs.AddLine("Downloading: " + sub.URL)
+		m.addLog("Downloading: " + sub.URL)
 		_, info, err := clash.DownloadSubscription(sub.URL, s.ProxyPort, s.APIPort)
 		if err != nil {
 			return tui.MsgLogLine("Error: " + err.Error())
@@ -629,7 +702,7 @@ func (m Model) switchSubscription() tea.Cmd {
 		
 		proxy.SetSystemProxy()
 		m.running = true
-		m.logs.AddLine("Core started")
+		m.addLog("Core started")
 		
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
@@ -707,18 +780,18 @@ func (m Model) importFromClipboard() tea.Cmd {
 
 func (m Model) downloadSub(name, url string) tea.Cmd {
 	return func() tea.Msg {
-		m.logs.AddLine("Downloading: " + url)
+		m.addLog("Downloading: " + url)
 		_, info, err := clash.DownloadSubscription(url, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
-			m.logs.AddLine("Error: " + err.Error())
+			m.addLog("Error: " + err.Error())
 			m.err = err.Error()
 			return nil
 		}
 
-		m.logs.AddLine("Subscription saved")
+		m.addLog("Subscription saved")
 
 		if !m.core.IsInstalled() {
-			m.logs.AddLine("Installing core...")
+			m.addLog("Installing core...")
 			m.core.Install()
 			m.core.DownloadGeoData()
 		}
@@ -727,7 +800,7 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 		m.core.Start()
 		proxy.SetSystemProxy()
 		m.running = true
-		m.logs.AddLine("Core started")
+		m.addLog("Core started")
 
 		m.err = ""
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
@@ -737,17 +810,17 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 // importNodes 导入节点链接（支持多行）
 func (m Model) importNodes(name, content string) tea.Cmd {
 	return func() tea.Msg {
-		m.logs.AddLine("→ Parsing node links...")
+		m.addLog("→ Parsing node links...")
 
 		// 解析节点链接
 		nodes := clash.ParseNodeLinks(content)
 		if len(nodes) == 0 {
-			m.logs.AddLine("⚠ No valid node links found")
+			m.addLog("⚠ No valid node links found")
 			m.err = "no valid node links"
 			return nil
 		}
 
-		m.logs.AddLine(fmt.Sprintf("→ Found %d nodes", len(nodes)))
+		m.addLog(fmt.Sprintf("→ Found %d nodes", len(nodes)))
 
 		// 保存为本地订阅（URL 为空，表示手动添加）
 		settings.AddSubscription(&m.settings, name, "")
@@ -757,14 +830,14 @@ func (m Model) importNodes(name, content string) tea.Cmd {
 		// 构建配置
 		configData := clash.BuildConfigFromNodes(nodes, m.settings.ProxyPort, m.settings.APIPort)
 		if err := config.SaveConfig([]byte(configData)); err != nil {
-			m.logs.AddLine("⚠ Error: " + err.Error())
+			m.addLog("⚠ Error: " + err.Error())
 			return nil
 		}
 
-		m.logs.AddLine("→ Config saved")
+		m.addLog("→ Config saved")
 
 		if !m.core.IsInstalled() {
-			m.logs.AddLine("→ Installing core...")
+			m.addLog("→ Installing core...")
 			m.core.Install()
 			m.core.DownloadGeoData()
 		}
@@ -773,7 +846,7 @@ func (m Model) importNodes(name, content string) tea.Cmd {
 		m.core.Start()
 		proxy.SetSystemProxy()
 		m.running = true
-		m.logs.AddLine("✓ Core started with imported nodes")
+		m.addLog("✓ Core started with imported nodes")
 
 		return tui.MsgRefresh{}
 	}

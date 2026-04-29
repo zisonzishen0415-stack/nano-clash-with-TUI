@@ -42,6 +42,13 @@ var (
 
 	SubHighlight = lipgloss.NewStyle().
 		Bold(true)
+
+	// 日志渐变颜色：最新最亮，越旧越灰
+	LogBright = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))  // 第1条（最新）
+	LogMedium = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))  // 第2条
+	LogDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))  // 第3条
+	LogFaint  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))  // 第4条
+	LogFade   = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))  // 第5条（最旧）
 )
 
 func DelayStyle(delay int) lipgloss.Style {
