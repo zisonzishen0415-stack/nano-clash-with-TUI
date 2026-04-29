@@ -67,7 +67,7 @@ func (m Model) Init() tea.Cmd {
 
 // addLog 添加日志到右下角悬浮栏和 Logs 标签页
 func (m *Model) addLog(line string) {
-	m.addLog(line)
+	m.logs.AddLine(line)
 	m.recentLogs = append(m.recentLogs, line)
 	if len(m.recentLogs) > 5 {
 		m.recentLogs = m.recentLogs[len(m.recentLogs)-5:]
@@ -81,19 +81,16 @@ func (m *Model) startAction(action string) {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 处理窗口尺寸变化
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil
-	}
-
+	// 处理窗口尺寸变化（放在主 switch 中）
 	if m.inputMode != "" {
 		return m.handleInputMode(msg)
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case tui.MsgProxiesLoaded:
 		cmd := m.nodes.Update(msg)
 		if len(msg) > 0 {
@@ -106,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
-	case tui.MsgDelayTested, tui.MsgRetryLoad, tui.MsgTestProgress:
+	case tui.MsgDelayTested, tui.MsgRetryLoad:
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
@@ -121,6 +118,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logs.Update(msg)
 		m.currentAction = ""
 		return m, nil
+
+	case tui.MsgTestAllStarted:
+		m.addLog(fmt.Sprintf("→ Testing %d nodes...", msg.Total))
+		return m, m.nodes.Update(msg)
+
+	case tui.MsgTestProgress:
+		// 测试进度，不单独记录日志
+		return m, m.nodes.Update(msg)
 
 	case tui.MsgRefresh:
 		if msg.Traffic != "" || msg.Expiry != "" {
@@ -217,19 +222,23 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfigEnter()
 	case "d":
 		if m.cursorIdx < len(m.settings.Subscriptions) {
+			name := m.settings.Subscriptions[m.cursorIdx].Name
 			settings.RemoveSubscription(&m.settings, m.cursorIdx)
 			if m.cursorIdx >= len(m.settings.Subscriptions) && len(m.settings.Subscriptions) > 0 {
 				m.cursorIdx = len(m.settings.Subscriptions)
 			}
-			return m, func() tea.Msg { return tui.MsgLogLine("Deleted subscription") }
+			m.addLog("✓ Deleted: " + name)
+			return m, nil
 		}
 		return m, nil
 	case "D":
+		count := len(m.settings.Subscriptions)
 		m.settings.Subscriptions = []settings.Subscription{}
 		m.settings.ActiveSubIdx = 0
 		settings.Save(m.settings)
 		m.cursorIdx = 0
-		return m, func() tea.Msg { return tui.MsgLogLine("Deleted all subscriptions") }
+		m.addLog(fmt.Sprintf("✓ Deleted all %d subscriptions", count))
+		return m, nil
 	}
 	return m, nil
 }
@@ -237,8 +246,11 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 	row := m.cursorIdx
 
+	// 切换订阅
 	if row < len(m.settings.Subscriptions) {
 		if row != m.settings.ActiveSubIdx {
+			name := m.settings.Subscriptions[row].Name
+			m.addLog("→ Switching to: " + name)
 			settings.SwitchSubscription(&m.settings, row)
 			return m, m.switchSubscription()
 		}
@@ -247,6 +259,7 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 
 	addRow := len(m.settings.Subscriptions)
 	if row == addRow {
+		m.addLog("→ Add subscription/nodes")
 		m.inputMode = "add_type"
 		m.inputBuf = ""
 		return m, nil
@@ -260,15 +273,30 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 		case 0:
 			m.settings.AutoStart = !m.settings.AutoStart
 			settings.Save(m.settings)
+			status := "off"
+			if m.settings.AutoStart {
+				status = "on"
+			}
+			m.addLog("✓ Auto start: " + status)
 			return m.handleAutoStartToggle()
 		case 1:
 			m.settings.AutoTestDelay = !m.settings.AutoTestDelay
 			settings.Save(m.settings)
+			status := "off"
+			if m.settings.AutoTestDelay {
+				status = "on"
+			}
+			m.addLog("✓ Auto test delay: " + status)
 			return m, nil
 		case 2:
 			m.settings.AutoSelectBest = !m.settings.AutoSelectBest
 			settings.Save(m.settings)
 			m.nodes.SetAutoSelectBest(m.settings.AutoSelectBest)
+			status := "off"
+			if m.settings.AutoSelectBest {
+				status = "on"
+			}
+			m.addLog("✓ Auto select best: " + status)
 			return m, nil
 		}
 	}
@@ -277,11 +305,13 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 	portIdx := row - portsStart
 
 	if portIdx == 0 {
+		m.addLog("→ Change proxy port...")
 		m.inputMode = "proxy_port"
 		m.inputBuf = fmt.Sprintf("%d", m.settings.ProxyPort)
 		return m, nil
 	}
 	if portIdx == 1 {
+		m.addLog("→ Change API port...")
 		m.inputMode = "api_port"
 		m.inputBuf = fmt.Sprintf("%d", m.settings.APIPort)
 		return m, nil
@@ -459,6 +489,9 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 		if err == nil && port > 0 && port <= 65535 {
 			m.settings.ProxyPort = port
 			settings.Save(m.settings)
+			m.addLog(fmt.Sprintf("✓ Proxy port: %d", port))
+		} else {
+			m.addLog("⚠ Invalid port")
 		}
 		m.inputMode = ""
 		return m, nil
@@ -468,6 +501,9 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 			m.settings.APIPort = port
 			settings.Save(m.settings)
 			m.client = clash.NewClient(port)
+			m.addLog(fmt.Sprintf("✓ API port: %d", port))
+		} else {
+			m.addLog("⚠ Invalid port")
 		}
 		m.inputMode = ""
 		return m, nil
@@ -520,19 +556,11 @@ func (m Model) View() string {
 
 	mainUI := tabs + "\n" + content + status + tui.Help.Render(help)
 
-	// 悬浮日志栏叠加在右下角
-	if m.width > 0 && m.height > 0 && len(m.recentLogs) > 0 {
+	// 悬浮日志栏叠加在右下角（简化实现：附加在底部）
+	if len(m.recentLogs) > 0 {
 		floatingLogs := m.renderFloatingLogs()
-		// 使用 ANSI 定位叠加日志栏
-		// 计算日志栏高度
-		logHeight := len(m.recentLogs)
-		// 将日志栏定位到右下角
-		posX := m.width - 42
-		posY := m.height - logHeight - 1
-		if posX > 0 && posY > 0 {
-			// 使用 ANSI escape codes 定位
-			return mainUI + fmt.Sprintf("\x1b[%d;%dH%s", posY, posX, floatingLogs)
-		}
+		// 将日志栏显示在状态栏下方，右对齐
+		return mainUI + "\n\n" + floatingLogs
 	}
 
 	return mainUI

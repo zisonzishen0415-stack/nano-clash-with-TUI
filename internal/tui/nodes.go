@@ -39,6 +39,9 @@ type MsgTestProgress struct {
 	Index int
 	Total int
 }
+type MsgTestAllStarted struct {
+	Total int
+}
 type MsgStopCore struct{}
 
 func NewNodesModel(client *clash.Client) NodesModel {
@@ -185,14 +188,12 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 		case "x":
 			return func() tea.Msg { return MsgStopCore{} }
 		case "t":
-			if len(m.proxies) > 0 {
-				return m.testDelay(m.selected)
-			}
-		case "T":
+			// 测试所有节点并按速度排序
 			if len(m.proxies) > 0 && !m.testing {
 				m.testing = true
 				m.testIdx = 0
 				return tea.Sequence(
+					func() tea.Msg { return MsgTestAllStarted{Total: len(m.proxies)} },
 					func() tea.Msg { return MsgTestProgress{Index: 0, Total: len(m.proxies)} },
 					m.testDelay(0),
 				)
@@ -261,7 +262,7 @@ func (m NodesModel) View() string {
 		b.WriteString(fmt.Sprintf("%s%s %s%s | %s\n", prefix, status, p.Name, curr, delayStyled))
 	}
 
-	b.WriteString("\n  j/k: select | enter: switch | t: test | T: test all")
+	b.WriteString("\n  j/k: select | enter: switch | t: test all & sort")
 	return b.String()
 }
 
