@@ -75,3 +75,7 @@ func GetBaseDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ConfigDir)
 }
+
+func GetOldSubscriptionPath() string {
+	return subscriptionPath
+}

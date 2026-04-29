@@ -19,6 +19,8 @@ import (
 )
 
 func main() {
+	settings.MigrateFromOldFormat()
+
 	args := os.Args[1:]
 
 	cleanStaleProxySettings()

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"clashtui/internal/config"
 )
 
 const SettingsFile = "settings.json"
@@ -131,4 +134,29 @@ func SwitchSubscription(s *Settings, idx int) {
 	}
 	s.ActiveSubIdx = idx
 	Save(*s)
+}
+
+func MigrateFromOldFormat() {
+	oldPath := config.GetOldSubscriptionPath()
+	data, err := os.ReadFile(oldPath)
+	if err != nil {
+		return
+	}
+
+	url := strings.TrimSpace(string(data))
+	if url == "" {
+		return
+	}
+
+	s := Load()
+	if len(s.Subscriptions) > 0 {
+		os.Remove(oldPath)
+		return
+	}
+
+	AddSubscription(&s, "Migrated", url)
+	s.ActiveSubIdx = 0
+	Save(s)
+
+	os.Remove(oldPath)
 }
