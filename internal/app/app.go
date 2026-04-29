@@ -19,19 +19,20 @@ import (
 )
 
 type Model struct {
-	tab       int
-	nodes     tui.NodesModel
-	logs      *tui.LogsModel
-	core      *clash.Core
-	client    *clash.Client
-	running   bool
-	err       string
-	settings  settings.Settings
-	cursorIdx int
-	inputMode string
-	inputBuf  string
-	addType   string
-	urlBuf    string
+	tab          int
+	nodes        tui.NodesModel
+	logs         *tui.LogsModel
+	core         *clash.Core
+	client       *clash.Client
+	running      bool
+	err          string
+	settings     settings.Settings
+	cursorIdx    int
+	inputMode    string
+	inputBuf     string
+	addType      string
+	urlBuf       string
+	currentAction string  // 当前正在进行的操作
 }
 
 func New() Model {
@@ -59,18 +60,44 @@ func (m Model) Init() tea.Cmd {
 	return m.nodes.Init()
 }
 
+// startAction 记录操作开始状态并写入日志
+func (m *Model) startAction(action string) {
+	m.currentAction = action
+	m.logs.AddLine("→ " + action)
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.inputMode != "" {
 		return m.handleInputMode(msg)
 	}
 
 	switch msg := msg.(type) {
-	case tui.MsgProxiesLoaded, tui.MsgProxySwitched, tui.MsgDelayTested, tui.MsgRetryLoad, tui.MsgTestProgress:
+	case tui.MsgProxiesLoaded:
+		cmd := m.nodes.Update(msg)
+		if len(msg) > 0 {
+			m.logs.AddLine(fmt.Sprintf("✓ Loaded %d proxies", len(msg)))
+		}
+		return m, cmd
+
+	case tui.MsgProxySwitched:
+		m.logs.AddLine(fmt.Sprintf("✓ Switched to: %s", string(msg)))
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
+	case tui.MsgDelayTested, tui.MsgRetryLoad, tui.MsgTestProgress:
+		cmd := m.nodes.Update(msg)
+		return m, cmd
+
+	case tui.MsgStopCore:
+		m.startAction("Stopping core")
+		m.core.Stop()
+		proxy.UnsetSystemProxy()
+		m.running = false
+		return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped, proxy disabled") }
+
 	case tui.MsgLogLine:
 		m.logs.Update(msg)
+		m.currentAction = ""
 		return m, nil
 
 	case tui.MsgRefresh:
@@ -113,21 +140,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch k {
 		case "x":
+			m.startAction("Stopping core and clearing proxy")
 			m.core.Stop()
 			proxy.UnsetSystemProxy()
 			m.running = false
-			return m, func() tea.Msg { return tui.MsgLogLine("Stopped core, proxy disabled") }
+			return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped, proxy disabled") }
 		case "s":
+			m.startAction("Adding subscription")
 			m.addType = "subscription"
 			m.inputMode = "url"
 			m.inputBuf = ""
 			m.urlBuf = ""
 			return m, nil
 		case "c":
+			m.startAction("Importing from clipboard")
 			return m, m.importFromClipboard()
 		case "r":
+			m.startAction("Restarting core")
 			return m, m.toggleCore()
 		case "q", "ctrl+c":
+			m.startAction("Exiting")
 			return m, tea.Quit
 		}
 
@@ -198,7 +230,7 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	settingsStart := addRow + 2
+	settingsStart := addRow + 1
 	settingsIdx := row - settingsStart
 
 	if settingsIdx >= 0 && settingsIdx < 3 {
@@ -219,7 +251,7 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	portsStart := settingsStart + 3 + 1
+	portsStart := settingsStart + 3
 	portIdx := row - portsStart
 
 	if portIdx == 0 {
@@ -420,8 +452,12 @@ func (m Model) View() string {
 	status := fmt.Sprintf("\n\n  Core: %s | Current: %s",
 		m.coreStatus(), m.nodes.GetCurrent())
 
+	if m.currentAction != "" {
+		status += "\n  " + tui.StatusOK.Render("⏳ " + m.currentAction)
+	}
+
 	if m.err != "" {
-		status += " | " + tui.StatusErr.Render(m.err)
+		status += "\n  " + tui.StatusErr.Render("⚠ " + m.err)
 	}
 
 	help := "\n  1/2/3 or h/l: switch tabs | q: quit"
@@ -567,30 +603,46 @@ func (m Model) toggleCore() tea.Cmd {
 		func() tea.Msg {
 			m.core.Stop()
 			proxy.UnsetSystemProxy()
-			return tui.MsgLogLine("Stopped existing core")
+			return tui.MsgLogLine("→ Stopping existing core...")
 		},
 		func() tea.Msg {
 			sub := settings.GetActiveSubscription(m.settings)
 			if sub == nil {
-				return tui.MsgLogLine("Error: no subscription, press c to import")
+				return tui.MsgLogLine("⚠ Error: no subscription, press c to import")
+			}
+			return tui.MsgLogLine("→ Downloading subscription...")
+		},
+		func() tea.Msg {
+			sub := settings.GetActiveSubscription(m.settings)
+			if sub == nil {
+				return nil
 			}
 			_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 			if err != nil {
-				return tui.MsgLogLine("Error: " + err.Error())
+				return tui.MsgLogLine("⚠ Error: " + err.Error())
 			}
 			return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
+		},
+		func() tea.Msg {
+			if !m.core.IsInstalled() {
+				return tui.MsgLogLine("→ Installing core...")
+			}
+			return nil
 		},
 		func() tea.Msg {
 			if !m.core.IsInstalled() {
 				m.core.Install()
 				m.core.DownloadGeoData()
 			}
+			return tui.MsgLogLine("→ Starting core...")
+		},
+		func() tea.Msg {
 			err := m.core.Start()
 			if err != nil {
-				return tui.MsgLogLine("Error starting: " + err.Error())
+				return tui.MsgLogLine("⚠ Error starting: " + err.Error())
 			}
 			proxy.SetSystemProxy()
-			return tui.MsgLogLine("Core started, proxy enabled")
+			return tui.MsgLogLine("✓ Core started, proxy enabled")
 		},
 	)
 }

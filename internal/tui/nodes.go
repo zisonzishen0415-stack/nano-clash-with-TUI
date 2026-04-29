@@ -211,6 +211,9 @@ func (m NodesModel) View() string {
 	}
 
 	if m.loading {
+		if m.retries > 0 {
+			return fmt.Sprintf("  Loading proxies... (attempt %d/10)\n\n  Core may be starting, please wait.", m.retries)
+		}
 		return "  Loading proxies..."
 	}
 
