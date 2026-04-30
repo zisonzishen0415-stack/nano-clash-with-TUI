@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 
 func main() {
 	settings.MigrateFromOldFormat()
+	setupShellRC()
 
 	args := os.Args[1:]
 
@@ -207,4 +210,38 @@ func cleanupOnExit() {
 	core := clash.NewCore()
 	core.Stop()
 	proxy.UnsetSystemProxy()
+}
+
+// setupShellRC adds auto-load proxy line to shell config if not present
+func setupShellRC() {
+	home, _ := os.UserHomeDir()
+
+	// Check shell config files
+	shellRCs := []string{
+		filepath.Join(home, ".bashrc"),
+		filepath.Join(home, ".zshrc"),
+	}
+
+	autoLoadLine := "[ -f ~/.config/clashtui/proxy.sh ] && source ~/.config/clashtui/proxy.sh 2>/dev/null"
+	marker := "clashtui/proxy.sh"
+
+	for _, rcFile := range shellRCs {
+		if _, err := os.Stat(rcFile); err != nil {
+			continue // File doesn't exist, skip
+		}
+
+		content, _ := os.ReadFile(rcFile)
+		if strings.Contains(string(content), marker) {
+			continue // Already has the line, skip
+		}
+
+		// Append the auto-load line
+		f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			continue
+		}
+		f.WriteString("\n# ClashTUI auto-load proxy\n")
+		f.WriteString(autoLoadLine + "\n")
+		f.Close()
+	}
 }
