@@ -167,8 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			proxy.UnsetSystemProxy()
 			m.running = false
 			m.addLog("✓ Core stopped, proxy cleared")
-			m.addLog("Terminal: source ~/.config/clashtui/proxy.sh")
-			return m, tea.Quit
+			return m, nil
 		case "s":
 			m.startAction("Adding subscription")
 			m.addType = "subscription"
