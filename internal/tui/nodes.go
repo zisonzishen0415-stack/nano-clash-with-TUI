@@ -45,18 +45,22 @@ type MsgTestAllStarted struct {
 type MsgStopCore struct{}
 
 func NewNodesModel(client *clash.Client) NodesModel {
+	loading := client.IsConnected()
 	return NodesModel{
 		client:         client,
-		loading:        true,
+		loading:        loading,
 		testing:        false,
 		retries:        0,
 		autoSelectBest: true,
-		initialLoad:    true,
+		initialLoad:    loading,
 	}
 }
 
 func (m NodesModel) Init() tea.Cmd {
-	return m.loadProxies
+	if m.loading {
+		return m.loadProxies
+	}
+	return nil
 }
 
 func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
