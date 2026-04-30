@@ -62,11 +62,6 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	// If we have a subscription and core is not running, start it
-	sub := settings.GetActiveSubscription(m.settings)
-	if sub != nil && sub.URL != "" && !m.running {
-		return m.toggleCore()
-	}
 	return m.nodes.Init()
 }
 
