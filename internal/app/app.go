@@ -129,8 +129,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settings.Subscriptions[m.settings.ActiveSubIdx].LastUpdate = time.Now()
 				settings.Save(m.settings)
 			}
+			// Only set running when MsgRefresh comes from actual core start (with traffic info)
+			m.running = true
 		}
-		m.running = true
 		cmd := m.nodes.Update(msg)
 		return m, cmd
 
