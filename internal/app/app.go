@@ -549,7 +549,7 @@ func (m Model) View() string {
 		status += "\n  " + tui.StatusErr.Render("⚠ " + m.err)
 	}
 
-	help := "\n  1/2/3 or h/l: switch tabs | x: stop & quit | q: quit"
+	help := "\n  1/2/3 or h/l: switch tabs | x: stop core | q: quit"
 
 	mainUI := tabs + "\n" + content + status + tui.Help.Render(help)
 
@@ -681,7 +681,7 @@ func (m Model) configView() string {
 }
 
 func (m Model) coreStatus() string {
-	if m.running || m.client.IsConnected() {
+	if m.running {
 		return tui.StatusOK.Render("running")
 	}
 	return tui.StatusErr.Render("stopped")
