@@ -50,6 +50,10 @@ func New() Model {
 
 	running := client.IsConnected()
 
+	if running && s.SystemProxy {
+		proxy.SetSystemProxy(s.ProxyPort)
+	}
+
 	return Model{
 		tab:      0,
 		nodes:    nodes,
@@ -107,7 +111,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.MsgStopCore:
 		m.core.Stop()
 		m.running = false
-		return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped") }
+		cmd := m.nodes.Update(msg)
+		return m, tea.Batch(cmd, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped") })
 
 	case tui.MsgLogLine:
 		m.logs.Update(msg)
@@ -129,10 +134,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settings.Subscriptions[m.settings.ActiveSubIdx].LastUpdate = time.Now()
 				settings.Save(m.settings)
 			}
-			// Only set running when MsgRefresh comes from actual core start (with traffic info)
 			m.running = true
 			m.currentAction = ""
 			m.addLog("✓ Core started")
+			if m.settings.SystemProxy {
+				proxy.SetSystemProxy(m.settings.ProxyPort)
+			}
 		}
 		cmd := m.nodes.Update(msg)
 		return m, cmd
@@ -172,6 +179,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentAction = ""
 			m.addLog("✓ Core stopped, proxy cleared")
 			m.addLog("Run: source ~/.config/clashtui/proxy.sh")
+			m.addLog("Note: DNS may break with fake-ip mode, press 'r' to restart")
 			return m, nil
 		case "s":
 			m.startAction("Adding subscription")
@@ -185,7 +193,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.importFromClipboard()
 		case "r":
 			m.startAction("Restarting core")
-			return m, m.toggleCore()
+			return m, m.restartCore()
+		case "R":
+			m.startAction("Refreshing subscription")
+			return m, m.refreshSubscription()
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
@@ -557,7 +568,7 @@ func (m Model) View() string {
 
 	mainUI := tabs + "\n" + content + status + tui.Help.Render(help)
 
-	if len(m.recentLogs) > 0 {
+	if len(m.recentLogs) > 0 && m.tab != 2 {
 		floatingLogs := m.renderFloatingLogs()
 		return mainUI + "\n\n" + floatingLogs
 	}
@@ -679,7 +690,7 @@ func (m Model) configView() string {
 	b.WriteString(fmt.Sprintf("%sAPI: %d\n", apiPrefix, m.settings.APIPort))
 
 	b.WriteString("\n  j/k: navigate | enter: action | d: delete | D: delete all\n")
-	b.WriteString("  c: import clipboard | r: refresh\n")
+	b.WriteString("  c: import clipboard | r: restart | R: refresh\n")
 
 	return b.String()
 }
@@ -724,17 +735,37 @@ func (m Model) switchSubscription() tea.Cmd {
 			return tui.MsgLogLine("Error starting: " + err.Error())
 		}
 
-
-		m.running = true
-		m.addLog("Core started")
-
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
 }
 
-func (m Model) toggleCore() tea.Cmd {
+func (m Model) restartCore() tea.Cmd {
+	return func() tea.Msg {
+		if !config.Exists() {
+			return tui.MsgLogLine("⚠ No config, press c to import")
+		}
+
+		m.core.Stop()
+
+		if !m.core.IsInstalled() {
+			m.core.Install()
+			m.core.DownloadGeoData()
+		}
+
+		if err := m.core.Start(); err != nil {
+			return tui.MsgLogLine("⚠ Start error: " + err.Error())
+		}
+
+		time.Sleep(500 * time.Millisecond)
+
+		return tui.MsgRefresh{}
+	}
+}
+
+func (m Model) refreshSubscription() tea.Cmd {
 	return func() tea.Msg {
 		m.core.Stop()
+		proxy.UnsetSystemProxy()
 
 		sub := settings.GetActiveSubscription(m.settings)
 		if sub == nil {
@@ -743,6 +774,7 @@ func (m Model) toggleCore() tea.Cmd {
 
 		_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
+			m.core.Start()
 			return tui.MsgLogLine("⚠ Download error: " + err.Error())
 		}
 
@@ -755,7 +787,10 @@ func (m Model) toggleCore() tea.Cmd {
 			return tui.MsgLogLine("⚠ Start error: " + err.Error())
 		}
 
-		// Wait for API to be ready
+		if m.settings.SystemProxy {
+			proxy.SetSystemProxy(m.settings.ProxyPort)
+		}
+
 		time.Sleep(500 * time.Millisecond)
 
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
@@ -803,9 +838,6 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
-
-		m.running = true
-		m.addLog("Core started")
 
 		m.err = ""
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}

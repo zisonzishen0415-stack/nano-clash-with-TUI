@@ -137,7 +137,10 @@ func runTUI() {
 		core.Stop()
 	}
 
-	p := tea.NewProgram(app.New())
+	p := tea.NewProgram(
+		app.New(),
+		tea.WithAltScreen(),
+	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
