@@ -62,6 +62,11 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	// If we have a subscription and core is not running, start it
+	sub := settings.GetActiveSubscription(m.settings)
+	if sub != nil && sub.URL != "" && !m.running {
+		return m.toggleCore()
+	}
 	return m.nodes.Init()
 }
 
@@ -131,6 +136,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Only set running when MsgRefresh comes from actual core start (with traffic info)
 			m.running = true
+			m.currentAction = ""
+			m.addLog("✓ Core started")
 		}
 		cmd := m.nodes.Update(msg)
 		return m, cmd
@@ -167,6 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.core.Stop()
 			proxy.UnsetSystemProxy()
 			m.running = false
+			m.currentAction = ""
 			m.addLog("✓ Core stopped, proxy cleared")
 			m.addLog("Run: source ~/.config/clashtui/proxy.sh")
 			return m, nil
@@ -732,35 +740,28 @@ func (m Model) switchSubscription() tea.Cmd {
 func (m Model) toggleCore() tea.Cmd {
 	return func() tea.Msg {
 		m.core.Stop()
-		m.addLog("→ Stopped existing core")
 
 		sub := settings.GetActiveSubscription(m.settings)
 		if sub == nil {
 			return tui.MsgLogLine("⚠ No subscription, press c to import")
 		}
 
-		m.addLog("→ Downloading subscription...")
 		_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
 		if err != nil {
 			return tui.MsgLogLine("⚠ Download error: " + err.Error())
 		}
 
 		if !m.core.IsInstalled() {
-			m.addLog("→ Installing core...")
 			m.core.Install()
 			m.core.DownloadGeoData()
 		}
 
-		m.addLog("→ Starting core...")
 		if err := m.core.Start(); err != nil {
 			return tui.MsgLogLine("⚠ Start error: " + err.Error())
 		}
 
 		// Wait for API to be ready
 		time.Sleep(500 * time.Millisecond)
-
-		m.running = true
-		m.addLog("✓ Core started")
 
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
