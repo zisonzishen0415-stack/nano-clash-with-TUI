@@ -10,8 +10,7 @@
 - 📝 **实时日志**：所有操作和系统状态实时记录
 - 🎨 **Vim风格**：j/k导航，h/l切换标签，全局快捷键
 - 🔧 **多订阅管理**：支持多个订阅切换
-
-> **注意**：系统代理需手动设置环境变量，见下方说明。
+- 🔄 **终端自动同步**：首次运行自动配置 ~/.bashrc，新终端自动加载代理状态
 
 ## 支持协议
 
@@ -36,12 +35,12 @@
 ## 安装
 
 ```bash
-# 编译
+# 编译并安装
 go build -o clashtui .
-
-# 安装到 PATH
 cp clashtui ~/.local/bin/
 ```
+
+首次运行时会自动配置 `~/.bashrc` 和 `~/.zshrc`，新开的终端会自动加载代理状态。
 
 ## 配置目录
 
@@ -51,6 +50,7 @@ cp clashtui ~/.local/bin/
 │   └── clash          # mihomo 内核二进制
 ├── config.yaml        # 当前 Clash 配置
 ├── settings.json      # 用户设置（订阅、端口等）
+├── proxy.sh           # 终端代理脚本（自动生成）
 ├── Country.mmdb       # GeoIP 数据库
 └── geosite.dat        # GeoSite 数据
 ```
@@ -64,7 +64,7 @@ cp clashtui ~/.local/bin/
 
 ### 2. Config（配置）
 - 订阅列表管理
-- 设置选项（开机自启、自动测速、自动选择最快）
+- 设置选项：开机自启、自动测速、自动选择最快、**System proxy**
 - 端口配置
 
 ### 3. Logs（日志）
@@ -77,8 +77,8 @@ cp clashtui ~/.local/bin/
 | 按键 | 功能 | 说明 |
 |------|------|------|
 | `1/2/3` 或 `h/l` | 切换标签页 | Nodes → Config → Logs |
-| `r` | 重启内核 | 停止→下载订阅→启动→设置代理，每步都有日志反馈 |
-| `x` | 停止内核 | 停止代理核心，清除系统代理 |
+| `r` | 重启内核 | 重新下载订阅并启动 |
+| `x` | 停止内核 | 停止代理，清除系统代理，留在 TUI |
 | `c` | 导入订阅 | 从剪贴板读取订阅链接 |
 | `s` | 添加订阅 | 手动输入订阅链接 |
 | `q` 或 `ctrl+c` | 退出 TUI | 退出程序，内核继续运行 |
@@ -91,7 +91,6 @@ cp clashtui ~/.local/bin/
 | `enter` | 切换到选中节点 |
 | `t` | 测试当前节点延迟 |
 | `T` | 测试所有节点延迟 |
-| `x` | 停止内核（同全局） |
 
 ### Config 标签页
 
@@ -106,15 +105,6 @@ cp clashtui ~/.local/bin/
 
 只读，自动显示最新日志。
 
-## 操作反馈
-
-界面底部显示当前操作状态：
-- `⏳ 操作名称` - 正在进行中
-- `✓ 成功信息` - 操作成功
-- `⚠ 错误信息` - 操作失败
-
-所有操作同时写入 Logs 标签页。
-
 ## 命令行
 
 | 命令 | 功能 |
@@ -122,35 +112,47 @@ cp clashtui ~/.local/bin/
 | `clashtui` | 打开 TUI 界面 |
 | `clashtui --status` | 输出状态 JSON（供 Waybar 使用） |
 | `clashtui --toggle` | 快速开关代理 |
-| `clashtui --stop` | 停止代理 |
+| `clashtui --stop` | 停止代理并清除系统代理 |
 | `clashtui --daemon` | 后台模式运行 |
-| `clashtui --env` | 打印代理环境变量（供 `eval` 使用） |
+| `clashtui --env` | 打印代理环境变量 |
 
-## 让应用使用代理
+## 代理生效范围
 
 ### GUI 应用（浏览器等）
 
 在 Config 标签页开启 **System proxy** 选项：
-- Firefox、Chrome 等浏览器立即生效（通过 GNOME/KDE 设置）
+
+**Firefox/大多数应用：**
+- 通过 GNOME/KDE gsettings 自动生效
 - 从 wofi/桌面图标启动的应用自动使用代理
-- 按下 `x` 或运行 `--stop` 时自动清除
+
+**Chrome/Chromium（Wayland）：**
+- Chrome 在 Wayland 下忽略 gsettings 代理设置
+- 开启 System proxy 时自动创建 `chrome-proxy.desktop` 启动器
+- 在 wofi 中选择 "Chrome (Proxy)" 即可使用代理访问外网
+- 关闭 System proxy 时自动删除该启动器
+
+**清理：**
+- 按 `x` 或运行 `--stop` 时自动清除系统代理和 DNS 缓存
 
 ### 终端应用
 
-终端需手动 source 脚本：
+首次运行 clashtui 后，自动在 `~/.bashrc` 和 `~/.zshrc` 添加：
 
 ```bash
-# 在 shell 中运行（启用/禁用都用同一个脚本）
-source ~/.config/clashtui/proxy.sh
-
-# 脚本会自动显示当前状态：
-# "Proxy enabled: 127.0.0.1:7890" 或 "Proxy disabled"
+[ -f ~/.config/clashtui/proxy.sh ] && source ~/.config/clashtui/proxy.sh 2>/dev/null
 ```
 
-**工作原理：**
-- TUI 启动代理时 → 创建 `proxy.sh`（设置环境变量）
-- TUI 停止代理时 → 更新 `proxy.sh`（清除环境变量）
-- 你只需 `source` 同一个文件即可同步状态
+**效果：**
+- 新开的终端（foot、bash、zsh）自动加载当前代理状态
+- 启用代理时：自动设置 `HTTP_PROXY` 等环境变量
+- 禁用代理时：自动清除环境变量
+
+**当前终端需手动同步：**
+```bash
+source ~/.config/clashtui/proxy.sh
+# 输出：Proxy enabled 或 Proxy disabled
+```
 
 ## Waybar 集成
 
@@ -165,7 +167,8 @@ source ~/.config/clashtui/proxy.sh
 
 状态 JSON 格式：
 ```json
-{"text":"🟢","tooltip":"Proxy: 新加坡01","class":"running"}
+{"text":"🟢","tooltip":"Proxy: DIRECT","class":"running"}
+{"text":"🔴","tooltip":"Proxy: stopped","class":"stopped"}
 ```
 
 详见 [docs/waybar.md](docs/waybar.md)
@@ -183,34 +186,18 @@ source ~/.config/clashtui/proxy.sh
    - `[3]` 节点 - 手动输入链接（支持多行）
    - `[4]` 节点 - 从剪贴板导入链接
 5. 输入订阅/节点名称后保存
-6. 按 `enter` 激活订阅，或按 `r` 全局启动
+6. 按 `enter` 激活订阅
 
 ### 快捷导入
 
-- 按 `c`：直接从剪贴板导入（自动识别订阅 URL 或节点链接）
+按 `c` 直接从剪贴板导入（自动识别订阅 URL 或节点链接）
 
 ### 使用代理
 
-1. 按 `1` 返回 Nodes 标签页
-2. 使用 `j/k` 选择节点，`enter` 切换
-3. 按 `T` 测试所有节点延迟，自动选择最快（如果启用）
-
-## 安全退出
-
-- 按 `x`：停止内核并退出，提示清除环境变量命令
-- 按 `q`：退出 TUI，内核继续运行
-
-**停止代理后**，需在 shell 中运行：
-
-```bash
-unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
-```
-
-如 DNS 无法解析，运行：
-
-```bash
-systemd-resolve --flush-caches
-```
+1. 在 Config 开启 **System proxy**
+2. 按 `1` 返回 Nodes 标签页
+3. `j/k` 选择节点，`enter` 切换
+4. 按 `T` 测试所有节点延迟
 
 ## 系统要求
 
@@ -225,7 +212,7 @@ systemd-resolve --flush-caches
 
 ## 开机自启
 
-在 Config 标签页开启 "Auto start on boot" 选项，会创建 systemd user service：
+在 Config 标签页开启 "Auto start on boot"，创建 systemd user service：
 - 服务名: `clashtui.service`
 - 模式: `--daemon` 后台运行
 

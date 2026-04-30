@@ -51,8 +51,9 @@
 
 ```bash
 clashtui              # 打开 TUI 界面
-clashtui --status     # 输出状态（供 Waybar 使用）
+clashtui --status     # 输出状态 JSON（供 Waybar 使用）
 clashtui --daemon     # 后台运行（不显示界面）
 clashtui --toggle     # 快速开关代理
-clashtui --stop       # 停止代理
+clashtui --stop       # 停止代理并清除系统代理
+clashtui --env        # 打印代理环境变量
 ```

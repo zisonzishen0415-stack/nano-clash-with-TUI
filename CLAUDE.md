@@ -28,7 +28,7 @@ ClashTUI is a terminal UI for managing Clash/mihomo proxy. Uses BubbleTea framew
   - `client.go` - REST API client for Clash external controller (127.0.0.1:9090)
   - `proxy.go` - ProxyInfo type and API methods (GetAllProxies, SwitchProxy, TestDelay)
 - `internal/config/config.go` - File paths (~/.config/clashtui/), config/subscription persistence
-- `internal/proxy/proxy.go` - System proxy via environment variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
+- `internal/proxy/proxy.go` - System proxy via gsettings (GNOME) and kwriteconfig (KDE); creates ~/.config/clashtui/proxy.sh for terminal users
 - `internal/clipboard/clipboard.go` - Clipboard read via wl-paste (Wayland) or xclip/xsel (X11)
 - `internal/tui/` - BubbleTea components:
   - `nodes.go` - Proxy list with selection, delay testing, auto-test on load

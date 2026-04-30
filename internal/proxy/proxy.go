@@ -11,7 +11,7 @@ import (
 func SetSystemProxy(port int) {
 	portStr := fmt.Sprintf("%d", port)
 
-	// GNOME (gsettings) - browsers read this
+	// GNOME (gsettings) - Firefox and most apps read this
 	if hasGsettings() {
 		exec.Command("gsettings", "set", "org.gnome.system.proxy", "mode", "manual").Run()
 		exec.Command("gsettings", "set", "org.gnome.system.proxy.http", "host", "127.0.0.1").Run()
@@ -37,6 +37,9 @@ func SetSystemProxy(port int) {
 			"--key", "NoProxyFor", "localhost,127.0.0.1").Run()
 	}
 
+	// Chrome on Wayland ignores gsettings - create desktop file with --proxy-server
+	createChromeProxyDesktop(port)
+
 	// Create shell script for terminal users to source
 	createProxyScript(port, true)
 }
@@ -54,6 +57,9 @@ func UnsetSystemProxy() {
 		exec.Command(kwriteCmd, "--file", "kioslaverc", "--group", "Proxy Settings",
 			"--key", "ProxyType", "0").Run()
 	}
+
+	// Remove Chrome proxy desktop file
+	removeChromeProxyDesktop()
 
 	// Flush DNS cache
 	exec.Command("systemd-resolve", "--flush-caches").Run()
@@ -114,4 +120,30 @@ func getKwriteconfigCmd() string {
 		return "kwriteconfig6"
 	}
 	return "kwriteconfig5"
+}
+
+// createChromeProxyDesktop creates a desktop file for Chrome with proxy flag
+// Chrome on Wayland ignores gsettings, needs explicit --proxy-server flag
+func createChromeProxyDesktop(port int) {
+	home, _ := os.UserHomeDir()
+	appDir := filepath.Join(home, ".local/share/applications")
+	os.MkdirAll(appDir, 0755)
+
+	desktopPath := filepath.Join(appDir, "chrome-proxy.desktop")
+
+	content := fmt.Sprintf(`[Desktop Entry]
+Name=Chrome (Proxy)
+Exec=google-chrome --proxy-server="http://127.0.0.1:%d"
+Type=Application
+Icon=google-chrome
+`, port)
+
+	os.WriteFile(desktopPath, []byte(content), 0755)
+}
+
+// removeChromeProxyDesktop removes the Chrome proxy desktop file
+func removeChromeProxyDesktop() {
+	home, _ := os.UserHomeDir()
+	desktopPath := filepath.Join(home, ".local/share/applications", "chrome-proxy.desktop")
+	os.Remove(desktopPath)
 }
