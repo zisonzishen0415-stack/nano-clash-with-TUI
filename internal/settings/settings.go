@@ -30,7 +30,7 @@ type Settings struct {
 	DefaultNode    string         `json:"default_node"`
 	ProxyPort      int            `json:"proxy_port"`
 	APIPort        int            `json:"api_port"`
-	SystemProxy    bool           `json:"system_proxy"` // Enable system proxy
+	SystemProxy    bool           `json:"system_proxy"`
 }
 
 var DefaultSettings = Settings{

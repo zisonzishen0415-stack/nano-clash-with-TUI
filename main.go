@@ -23,8 +23,6 @@ func main() {
 
 	args := os.Args[1:]
 
-	cleanStaleProxySettings()
-
 	if len(args) > 0 {
 		switch args[0] {
 		case "--status":
@@ -38,6 +36,9 @@ func main() {
 			return
 		case "--toggle":
 			toggleProxy()
+			return
+		case "--env":
+			printEnv()
 			return
 		}
 	}
@@ -53,11 +54,12 @@ func getAPIPort() int {
 	return s.APIPort
 }
 
-func cleanStaleProxySettings() {
-	client := clash.NewClient(getAPIPort())
-	if !client.IsConnected() {
-		proxy.UnsetSystemProxy()
+func getProxyPort() int {
+	s := settings.Load()
+	if s.ProxyPort == 0 {
+		return 7890
 	}
+	return s.ProxyPort
 }
 
 func printStatus() {
@@ -95,6 +97,8 @@ func runDaemon() {
 	defer singleinstance.Release()
 	defer cleanupOnExit()
 
+	s := settings.Load()
+
 	if config.Exists() {
 		core := clash.NewCore()
 		if !core.IsInstalled() {
@@ -102,7 +106,9 @@ func runDaemon() {
 			core.DownloadGeoData()
 		}
 		core.Start()
-		proxy.SetSystemProxy()
+		if s.SystemProxy {
+			proxy.SetSystemProxy(s.ProxyPort)
+		}
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -128,20 +134,20 @@ func runTUI() {
 		core.Stop()
 	}
 
-	// 不使用 alt screen，这样退出消息能正常显示
 	p := tea.NewProgram(app.New())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 
-	// 退出后显示消息
+	// Exit message
 	client = clash.NewClient(getAPIPort())
 	if client.IsConnected() {
-		fmt.Println("\n  ✓ Exited TUI - clash core still running")
-		fmt.Println("  Run 'clashtui' to reopen, or 'clashtui --stop' to stop proxy")
+		fmt.Println("\n  ✓ Exited - core running")
+		fmt.Println("  Run 'clashtui --env' to see proxy env vars")
 	} else {
-		fmt.Println("\n  ✓ Exited TUI - clash core stopped")
+		fmt.Println("\n  ✓ Exited - core stopped")
+		fmt.Println("  Run in shell: unset HTTP_PROXY HTTPS_PROXY ALL_PROXY")
 	}
 }
 
@@ -161,12 +167,14 @@ func stopAll() {
 	core := clash.NewCore()
 	core.Stop()
 	proxy.UnsetSystemProxy()
-	fmt.Println("Stopped")
+	fmt.Println("Stopped, proxy cleared")
+	fmt.Println("Terminal: source ~/.config/clashtui/proxy.sh")
 }
 
 func toggleProxy() {
 	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
+	s := settings.Load()
 
 	if connected {
 		stopAll()
@@ -181,9 +189,18 @@ func toggleProxy() {
 			core.DownloadGeoData()
 		}
 		core.Start()
-		proxy.SetSystemProxy()
+		if s.SystemProxy {
+			proxy.SetSystemProxy(s.ProxyPort)
+		}
 		fmt.Println("Started")
 	}
+}
+
+func printEnv() {
+	port := getProxyPort()
+	fmt.Printf("export HTTP_PROXY=http://127.0.0.1:%d\n", port)
+	fmt.Printf("export HTTPS_PROXY=http://127.0.0.1:%d\n", port)
+	fmt.Printf("export ALL_PROXY=socks5://127.0.0.1:%d\n", port)
 }
 
 func cleanupOnExit() {

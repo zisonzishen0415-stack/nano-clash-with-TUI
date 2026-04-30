@@ -34,10 +34,10 @@ type Model struct {
 	inputBuf      string
 	addType       string
 	urlBuf        string
-	currentAction string  // 当前正在进行的操作
-	recentLogs    []string // 最近5条日志，右下角悬浮显示
-	width         int      // 终端宽度
-	height        int      // 终端高度
+	currentAction string
+	recentLogs    []string
+	width         int
+	height        int
 }
 
 func New() Model {
@@ -49,11 +49,6 @@ func New() Model {
 	logs := tui.NewLogsModel()
 
 	running := client.IsConnected()
-
-	// 如果 core 已运行，设置系统代理（如果启用）
-	if running && s.SystemProxy {
-		proxy.SetSystemProxy()
-	}
 
 	return Model{
 		tab:      0,
@@ -70,7 +65,6 @@ func (m Model) Init() tea.Cmd {
 	return m.nodes.Init()
 }
 
-// addLog 添加日志到右下角悬浮栏和 Logs 标签页
 func (m *Model) addLog(line string) {
 	m.logs.AddLine(line)
 	m.recentLogs = append(m.recentLogs, line)
@@ -79,14 +73,12 @@ func (m *Model) addLog(line string) {
 	}
 }
 
-// startAction 记录操作开始状态并写入日志
 func (m *Model) startAction(action string) {
 	m.currentAction = action
 	m.addLog("→ " + action)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 处理窗口尺寸变化（放在主 switch 中）
 	if m.inputMode != "" {
 		return m.handleInputMode(msg)
 	}
@@ -113,11 +105,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tui.MsgStopCore:
-		m.startAction("Stopping core")
 		m.core.Stop()
-		proxy.UnsetSystemProxy()
 		m.running = false
-		return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped, proxy disabled") }
+		return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped") }
 
 	case tui.MsgLogLine:
 		m.logs.Update(msg)
@@ -129,7 +119,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.nodes.Update(msg)
 
 	case tui.MsgTestProgress:
-		// 测试进度，不单独记录日志
 		return m, m.nodes.Update(msg)
 
 	case tui.MsgRefresh:
@@ -148,6 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		k := msg.String()
 
+		// Tab switching
 		switch k {
 		case "h", "left":
 			if m.tab > 0 {
@@ -170,13 +160,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Global keys
 		switch k {
 		case "x":
-			m.startAction("Stopping core and clearing proxy")
 			m.core.Stop()
 			proxy.UnsetSystemProxy()
 			m.running = false
-			return m, func() tea.Msg { return tui.MsgLogLine("✓ Core stopped, proxy disabled") }
+			m.addLog("✓ Core stopped, proxy cleared")
+			m.addLog("Terminal: source ~/.config/clashtui/proxy.sh")
+			return m, tea.Quit
 		case "s":
 			m.startAction("Adding subscription")
 			m.addType = "subscription"
@@ -191,7 +183,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startAction("Restarting core")
 			return m, m.toggleCore()
 		case "q", "ctrl+c":
-			// 退出 TUI
 			return m, tea.Quit
 		}
 
@@ -251,7 +242,6 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 	row := m.cursorIdx
 
-	// 切换订阅
 	if row < len(m.settings.Subscriptions) {
 		if row != m.settings.ActiveSubIdx {
 			name := m.settings.Subscriptions[row].Name
@@ -307,12 +297,9 @@ func (m Model) handleConfigEnter() (tea.Model, tea.Cmd) {
 			m.settings.SystemProxy = !m.settings.SystemProxy
 			settings.Save(m.settings)
 			if m.settings.SystemProxy {
-				if m.running {
-					proxy.SetSystemProxy()
-					m.addLog("✓ System proxy: on")
-				} else {
-					m.addLog("✓ System proxy: on (will enable when core starts)")
-				}
+				proxy.SetSystemProxy(m.settings.ProxyPort)
+				m.addLog("✓ System proxy: on")
+				m.addLog("Terminal: source ~/.config/clashtui/proxy.sh")
 			} else {
 				proxy.UnsetSystemProxy()
 				m.addLog("✓ System proxy: off")
@@ -390,7 +377,6 @@ func (m Model) handleInputMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "c":
-		// 从剪贴板导入
 		if m.inputMode == "url" || m.inputMode == "nodes" {
 			content, err := clipboard.Read()
 			if err != nil {
@@ -415,13 +401,11 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 	switch m.inputMode {
 	case "add_type":
 		if m.inputBuf == "1" {
-			// 订阅 - 输入 URL
 			m.addType = "subscription"
 			m.inputMode = "url"
 			m.inputBuf = ""
 			return m, nil
 		} else if m.inputBuf == "2" {
-			// 订阅 - 从剪贴板
 			m.addType = "subscription"
 			content, err := clipboard.Read()
 			if err != nil {
@@ -429,7 +413,6 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 				m.inputMode = ""
 				return m, nil
 			}
-			// 检查是否是订阅 URL
 			if strings.HasPrefix(content, "http://") || strings.HasPrefix(content, "https://") {
 				m.urlBuf = content
 				m.inputMode = "name"
@@ -441,13 +424,11 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 			m.inputMode = ""
 			return m, nil
 		} else if m.inputBuf == "3" {
-			// 节点 - 输入链接
 			m.addType = "nodes"
 			m.inputMode = "nodes"
 			m.inputBuf = ""
 			return m, nil
 		} else if m.inputBuf == "4" {
-			// 节点 - 从剪贴板
 			m.addType = "nodes"
 			content, err := clipboard.Read()
 			if err != nil {
@@ -455,7 +436,6 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 				m.inputMode = ""
 				return m, nil
 			}
-			// 检查剪贴板是否包含节点链接
 			if clash.ContainsNodeLinks(content) {
 				m.urlBuf = content
 				m.inputMode = "name"
@@ -470,13 +450,11 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 		m.inputMode = ""
 		return m, nil
 	case "url":
-		// 订阅 URL 输入完成
 		m.urlBuf = m.inputBuf
 		m.inputMode = "name"
 		m.inputBuf = ""
 		return m, nil
 	case "nodes":
-		// 节点链接输入完成
 		m.urlBuf = m.inputBuf
 		m.inputMode = "name"
 		m.inputBuf = ""
@@ -494,7 +472,6 @@ func (m Model) finishInputMode() (tea.Model, tea.Cmd) {
 			m.urlBuf = ""
 			return m, m.downloadSub(name, m.urlBuf)
 		} else if m.addType == "nodes" {
-			// 导入节点链接
 			m.addLog("→ Importing nodes...")
 			m.inputMode = ""
 			m.inputBuf = ""
@@ -572,21 +549,18 @@ func (m Model) View() string {
 		status += "\n  " + tui.StatusErr.Render("⚠ " + m.err)
 	}
 
-	help := "\n  1/2/3 or h/l: switch tabs | q: quit"
+	help := "\n  1/2/3 or h/l: switch tabs | x: stop & quit | q: quit"
 
 	mainUI := tabs + "\n" + content + status + tui.Help.Render(help)
 
-	// 悬浮日志栏叠加在右下角（简化实现：附加在底部）
 	if len(m.recentLogs) > 0 {
 		floatingLogs := m.renderFloatingLogs()
-		// 将日志栏显示在状态栏下方，右对齐
 		return mainUI + "\n\n" + floatingLogs
 	}
 
 	return mainUI
 }
 
-// renderFloatingLogs 渲染右下角悬浮日志栏
 func (m Model) renderFloatingLogs() string {
 	if len(m.recentLogs) == 0 {
 		return ""
@@ -598,14 +572,12 @@ func (m Model) renderFloatingLogs() string {
 	}
 
 	var lines []string
-	// 最新日志在最下面（倒序显示）
 	for i := len(m.recentLogs) - 1; i >= 0; i-- {
 		log := m.recentLogs[i]
 		styleIdx := len(m.recentLogs) - 1 - i
 		if styleIdx >= len(styles) {
 			styleIdx = len(styles) - 1
 		}
-		// 截断长日志
 		if len(log) > logWidth-4 {
 			log = log[:logWidth-6] + ".."
 		}
@@ -624,11 +596,11 @@ func (m Model) renderFloatingLogs() string {
 func (m Model) renderInputMode() string {
 	switch m.inputMode {
 	case "add_type":
-		return fmt.Sprintf("\n  Add new:\n  [1] Subscription - type URL\n  [2] Subscription - paste from clipboard\n  [3] Nodes - type links (supports multiple)\n  [4] Nodes - paste from clipboard\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Add new:\n  [1] Subscription - type URL\n  [2] Subscription - paste from clipboard\n  [3] Nodes - type links\n  [4] Nodes - paste from clipboard\n\n  Enter choice: %s_\n  enter: submit | esc: cancel", m.inputBuf)
 	case "url":
-		return fmt.Sprintf("\n  Enter subscription URL (http/https):\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Enter subscription URL:\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
 	case "nodes":
-		return fmt.Sprintf("\n  Enter node links (supports multiple lines):\n  Supported: trojan://, vless://, vmess://, ss://, hysteria2://, hy2://, socks5://, wireguard://, tuic://\n\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
+		return fmt.Sprintf("\n  Enter node links:\n  Supported: trojan://, vless://, vmess://, ss://, hysteria2://, hy2://\n\n  > %s_\n\n  c: paste from clipboard | enter: submit | esc: cancel", m.inputBuf)
 	case "name":
 		return fmt.Sprintf("\n  Enter name:\n  > %s_\n\n  enter: submit | esc: cancel", m.inputBuf)
 	case "proxy_port":
@@ -719,42 +691,39 @@ func (m Model) switchSubscription() tea.Cmd {
 	return func() tea.Msg {
 		m.core.Stop()
 		m.addLog("Switching subscription...")
-		
+
 		s := settings.Load()
 		sub := settings.GetActiveSubscription(s)
 		if sub == nil || sub.URL == "" {
 			return tui.MsgLogLine("No subscription")
 		}
-		
+
 		m.addLog("Downloading: " + sub.URL)
 		_, info, err := clash.DownloadSubscription(sub.URL, s.ProxyPort, s.APIPort)
 		if err != nil {
 			return tui.MsgLogLine("Error: " + err.Error())
 		}
-		
+
 		if info.Traffic != "" || info.Expiry != "" {
 			s.Subscriptions[s.ActiveSubIdx].Traffic = info.Traffic
 			s.Subscriptions[s.ActiveSubIdx].Expiry = info.Expiry
 			s.Subscriptions[s.ActiveSubIdx].LastUpdate = time.Now()
 			settings.Save(s)
 		}
-		
+
 		if !m.core.IsInstalled() {
 			m.core.Install()
 			m.core.DownloadGeoData()
 		}
-		
+
 		if err := m.core.Start(); err != nil {
 			return tui.MsgLogLine("Error starting: " + err.Error())
 		}
-		
-		// Use existing s from line 730
-		if s.SystemProxy {
-			proxy.SetSystemProxy()
-		}
+
+
 		m.running = true
 		m.addLog("Core started")
-		
+
 		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
 	}
 }
@@ -763,7 +732,6 @@ func (m Model) toggleCore() tea.Cmd {
 	return tea.Sequence(
 		func() tea.Msg {
 			m.core.Stop()
-			proxy.UnsetSystemProxy()
 			return tui.MsgLogLine("→ Stopping existing core...")
 		},
 		func() tea.Msg {
@@ -802,11 +770,8 @@ func (m Model) toggleCore() tea.Cmd {
 			if err != nil {
 				return tui.MsgLogLine("⚠ Error starting: " + err.Error())
 			}
-			if m.settings.SystemProxy {
-				proxy.SetSystemProxy()
-				return tui.MsgLogLine("✓ Core started, proxy enabled")
-			}
-			return tui.MsgLogLine("✓ Core started (proxy disabled)")
+	
+			return tui.MsgLogLine("✓ Core started")
 		},
 	)
 }
@@ -852,9 +817,7 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
-			if m.settings.SystemProxy {
-				proxy.SetSystemProxy()
-			}
+
 		m.running = true
 		m.addLog("Core started")
 
@@ -863,12 +826,10 @@ func (m Model) downloadSub(name, url string) tea.Cmd {
 	}
 }
 
-// importNodes 导入节点链接（支持多行）
 func (m Model) importNodes(name, content string) tea.Cmd {
 	return func() tea.Msg {
 		m.addLog("→ Parsing node links...")
 
-		// 解析节点链接
 		nodes := clash.ParseNodeLinks(content)
 		if len(nodes) == 0 {
 			m.addLog("⚠ No valid node links found")
@@ -878,12 +839,10 @@ func (m Model) importNodes(name, content string) tea.Cmd {
 
 		m.addLog(fmt.Sprintf("→ Found %d nodes", len(nodes)))
 
-		// 保存为本地订阅（URL 为空，表示手动添加）
 		settings.AddSubscription(&m.settings, name, "")
 		m.settings.Subscriptions[len(m.settings.Subscriptions)-1].Traffic = fmt.Sprintf("%d nodes", len(nodes))
 		settings.Save(m.settings)
 
-		// 构建配置
 		configData := clash.BuildConfigFromNodes(nodes, m.settings.ProxyPort, m.settings.APIPort)
 		if err := config.SaveConfig([]byte(configData)); err != nil {
 			m.addLog("⚠ Error: " + err.Error())
@@ -900,9 +859,7 @@ func (m Model) importNodes(name, content string) tea.Cmd {
 
 		m.core.Stop()
 		m.core.Start()
-			if m.settings.SystemProxy {
-				proxy.SetSystemProxy()
-			}
+
 		m.running = true
 		m.addLog("✓ Core started with imported nodes")
 
