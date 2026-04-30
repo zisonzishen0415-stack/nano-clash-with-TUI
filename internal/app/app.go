@@ -729,51 +729,40 @@ func (m Model) switchSubscription() tea.Cmd {
 }
 
 func (m Model) toggleCore() tea.Cmd {
-	return tea.Sequence(
-		func() tea.Msg {
-			m.core.Stop()
-			return tui.MsgLogLine("→ Stopping existing core...")
-		},
-		func() tea.Msg {
-			sub := settings.GetActiveSubscription(m.settings)
-			if sub == nil {
-				return tui.MsgLogLine("⚠ Error: no subscription, press c to import")
-			}
-			return tui.MsgLogLine("→ Downloading subscription...")
-		},
-		func() tea.Msg {
-			sub := settings.GetActiveSubscription(m.settings)
-			if sub == nil {
-				return nil
-			}
-			_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
-			if err != nil {
-				return tui.MsgLogLine("⚠ Error: " + err.Error())
-			}
-			return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
-		},
-		func() tea.Msg {
-			if !m.core.IsInstalled() {
-				return tui.MsgLogLine("→ Installing core...")
-			}
-			return nil
-		},
-		func() tea.Msg {
-			if !m.core.IsInstalled() {
-				m.core.Install()
-				m.core.DownloadGeoData()
-			}
-			return tui.MsgLogLine("→ Starting core...")
-		},
-		func() tea.Msg {
-			err := m.core.Start()
-			if err != nil {
-				return tui.MsgLogLine("⚠ Error starting: " + err.Error())
-			}
-	
-			return tui.MsgLogLine("✓ Core started")
-		},
-	)
+	return func() tea.Msg {
+		m.core.Stop()
+		m.addLog("→ Stopped existing core")
+
+		sub := settings.GetActiveSubscription(m.settings)
+		if sub == nil {
+			return tui.MsgLogLine("⚠ No subscription, press c to import")
+		}
+
+		m.addLog("→ Downloading subscription...")
+		_, info, err := clash.DownloadSubscription(sub.URL, m.settings.ProxyPort, m.settings.APIPort)
+		if err != nil {
+			return tui.MsgLogLine("⚠ Download error: " + err.Error())
+		}
+
+		if !m.core.IsInstalled() {
+			m.addLog("→ Installing core...")
+			m.core.Install()
+			m.core.DownloadGeoData()
+		}
+
+		m.addLog("→ Starting core...")
+		if err := m.core.Start(); err != nil {
+			return tui.MsgLogLine("⚠ Start error: " + err.Error())
+		}
+
+		// Wait for API to be ready
+		time.Sleep(500 * time.Millisecond)
+
+		m.running = true
+		m.addLog("✓ Core started")
+
+		return tui.MsgRefresh{Traffic: info.Traffic, Expiry: info.Expiry}
+	}
 }
 
 func (m Model) importFromClipboard() tea.Cmd {
