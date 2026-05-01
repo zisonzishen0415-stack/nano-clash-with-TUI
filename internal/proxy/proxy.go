@@ -44,7 +44,7 @@ func SetSystemProxy(port int) {
 	createProxyScript(port, true)
 }
 
-// UnsetSystemProxy clears system proxy and creates clear script
+// UnsetSystemProxy clears system proxy and restores DNS
 func UnsetSystemProxy() {
 	// Clear GNOME
 	if hasGsettings() {
@@ -61,14 +61,15 @@ func UnsetSystemProxy() {
 	// Remove Chrome proxy desktop file
 	removeChromeProxyDesktop()
 
-	// Flush DNS cache
-	exec.Command("systemd-resolve", "--flush-caches").Run()
+	// Restore DNS - critical for recovery after fake-ip mode
+	restoreDNS()
 
 	// Create shell script to clear env vars
 	createProxyScript(0, false)
 }
 
 // createProxyScript creates ~/.config/clashtui/proxy.sh for user to source
+// The script is smart - it checks if mihomo is running before setting env vars
 func createProxyScript(port int, enable bool) {
 	home, _ := os.UserHomeDir()
 	configDir := filepath.Join(home, ".config", "clashtui")
@@ -78,14 +79,29 @@ func createProxyScript(port int, enable bool) {
 
 	var content string
 	if enable {
+		// Smart script that only sets proxy if mihomo is actually running
 		content = fmt.Sprintf(`#!/bin/sh
 # ClashTUI proxy env vars - run: source ~/.config/clashtui/proxy.sh
-export HTTP_PROXY=http://127.0.0.1:%d
-export HTTPS_PROXY=http://127.0.0.1:%d
-export ALL_PROXY=socks5://127.0.0.1:%d
-export NO_PROXY=localhost,127.0.0.1
-echo "Proxy enabled: 127.0.0.1:%d"
-`, port, port, port, port)
+# Smart: only sets proxy if mihomo is running
+
+MIHOMO_PORT=%d
+
+# Check if mihomo is running by testing the API
+if curl -s --connect-timeout 1 http://127.0.0.1:9090/version >/dev/null 2>&1; then
+    export HTTP_PROXY=http://127.0.0.1:$MIHOMO_PORT
+    export HTTPS_PROXY=http://127.0.0.1:$MIHOMO_PORT
+    export ALL_PROXY=socks5://127.0.0.1:$MIHOMO_PORT
+    export NO_PROXY=localhost,127.0.0.1
+    echo "Proxy enabled: 127.0.0.1:$MIHOMO_PORT"
+else
+    unset HTTP_PROXY
+    unset HTTPS_PROXY
+    unset ALL_PROXY
+    unset NO_PROXY
+    unset no_proxy
+    echo "Proxy disabled: mihomo not running"
+fi
+`, port)
 	} else {
 		content = `#!/bin/sh
 # ClashTUI proxy cleared - run: source ~/.config/clashtui/proxy.sh
@@ -146,4 +162,18 @@ func removeChromeProxyDesktop() {
 	home, _ := os.UserHomeDir()
 	desktopPath := filepath.Join(home, ".local/share/applications", "chrome-proxy.desktop")
 	os.Remove(desktopPath)
+}
+
+// restoreDNS restores DNS settings after proxy shutdown
+// Critical for systems where mihomo fake-ip mode modified DNS
+func restoreDNS() {
+	// Flush DNS caches
+	exec.Command("resolvectl", "flush-caches").Run()
+	exec.Command("systemd-resolve", "--flush-caches").Run()
+
+	// Restart systemd-resolved if available (restores default DNS)
+	exec.Command("systemctl", "restart", "systemd-resolved").Run()
+
+	// For systems using NetworkManager, trigger DNS reload
+	exec.Command("nmcli", "general", "reload", "dns").Run()
 }

@@ -50,6 +50,12 @@ func New() Model {
 
 	running := client.IsConnected()
 
+	// Critical: Clear stale proxy settings from previous session if core not running
+	// gsettings persist across reboot, but mihomo doesn't auto-start
+	if !running && s.SystemProxy {
+		proxy.UnsetSystemProxy()
+	}
+
 	if running && s.SystemProxy {
 		proxy.SetSystemProxy(s.ProxyPort)
 	}
@@ -127,6 +133,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.nodes.Update(msg)
 
 	case tui.MsgRefresh:
+		// Core has started - always update running status
+		m.running = true
+		m.currentAction = ""
+		m.addLog("✓ Core started")
+
+		// Update subscription info if available
 		if msg.Traffic != "" || msg.Expiry != "" {
 			if m.settings.ActiveSubIdx >= 0 && m.settings.ActiveSubIdx < len(m.settings.Subscriptions) {
 				m.settings.Subscriptions[m.settings.ActiveSubIdx].Traffic = msg.Traffic
@@ -134,12 +146,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settings.Subscriptions[m.settings.ActiveSubIdx].LastUpdate = time.Now()
 				settings.Save(m.settings)
 			}
-			m.running = true
-			m.currentAction = ""
-			m.addLog("✓ Core started")
-			if m.settings.SystemProxy {
-				proxy.SetSystemProxy(m.settings.ProxyPort)
-			}
+		}
+
+		if m.settings.SystemProxy {
+			proxy.SetSystemProxy(m.settings.ProxyPort)
 		}
 		cmd := m.nodes.Update(msg)
 		return m, cmd

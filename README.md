@@ -10,7 +10,7 @@
 - 📝 **实时日志**：所有操作和系统状态实时记录
 - 🎨 **Vim风格**：j/k导航，h/l切换标签，全局快捷键
 - 🔧 **多订阅管理**：支持多个订阅切换
-- 🔄 **终端自动同步**：首次运行自动配置 ~/.bashrc，新终端自动加载代理状态
+- 🛡️ **安全恢复**：网络中断时可一键恢复
 
 ## 支持协议
 
@@ -35,12 +35,18 @@
 ## 安装
 
 ```bash
-# 编译并安装
+# 方法1: 使用安装脚本（推荐）
+curl -fsSL https://raw.githubusercontent.com/zisonz/clashtui/main/install.sh | bash
+
+# 方法2: 手动编译
 go build -o clashtui .
 cp clashtui ~/.local/bin/
 ```
 
-首次运行时会自动配置 `~/.bashrc` 和 `~/.zshrc`，新开的终端会自动加载代理状态。
+**首次使用：**
+1. 运行 `clashtui`
+2. 按 `2` 切换到 Config 标签页
+3. 按 `c` 从剪贴板导入订阅链接
 
 ## 配置目录
 
@@ -113,8 +119,24 @@ cp clashtui ~/.local/bin/
 | `clashtui --status` | 输出状态 JSON（供 Waybar 使用） |
 | `clashtui --toggle` | 快速开关代理 |
 | `clashtui --stop` | 停止代理并清除系统代理 |
+| `clashtui --restore-network` | **恢复网络**（网络中断时使用） |
 | `clashtui --daemon` | 后台模式运行 |
 | `clashtui --env` | 打印代理环境变量 |
+
+## ⚠️ 重要：网络恢复
+
+如果重启后网络中断（浏览器无法访问任何网站），运行：
+
+```bash
+clashtui --restore-network
+```
+
+这会：
+- 清除系统代理设置（gsettings）
+- 停止残留的 mihomo 进程
+- 重置 DNS
+
+**原因：** gsettings 代理设置会持久化保存，重启后仍指向 `127.0.0.1:7890`，但 mihomo 未启动。
 
 ## 代理生效范围
 
@@ -137,22 +159,15 @@ cp clashtui ~/.local/bin/
 
 ### 终端应用
 
-首次运行 clashtui 后，自动在 `~/.bashrc` 和 `~/.zshrc` 添加：
-
-```bash
-[ -f ~/.config/clashtui/proxy.sh ] && source ~/.config/clashtui/proxy.sh 2>/dev/null
-```
-
-**效果：**
-- 新开的终端（foot、bash、zsh）自动加载当前代理状态
-- 启用代理时：自动设置 `HTTP_PROXY` 等环境变量
-- 禁用代理时：自动清除环境变量
-
-**当前终端需手动同步：**
+**手动同步代理状态：**
 ```bash
 source ~/.config/clashtui/proxy.sh
-# 输出：Proxy enabled 或 Proxy disabled
+# 输出：Proxy enabled: 127.0.0.1:7890 或 Proxy disabled: mihomo not running
 ```
+
+**智能检测：** proxy.sh 会自动检测 mihomo 是否运行：
+- 运行中 → 设置环境变量
+- 未运行 → 清除环境变量
 
 ## Waybar 集成
 

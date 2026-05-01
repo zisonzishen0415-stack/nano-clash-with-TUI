@@ -62,21 +62,53 @@ func (c *Client) GetAllProxies() ([]ProxyInfo, error) {
 }
 
 func (c *Client) GetCurrentProxy() (string, error) {
-	data, err := c.Get("/proxies/Auto")
-	if err != nil {
-		return "", err
+	// Try multiple proxy group names (different subscriptions use different names)
+	groupNames := []string{"Auto", "自动选择", "GLOBAL", "Proxy", "代理"}
+
+	for _, name := range groupNames {
+		data, err := c.Get("/proxies/" + name)
+		if err != nil {
+			continue
+		}
+
+		var detail ProxyDetail
+		if err := json.Unmarshal(data, &detail); err != nil {
+			continue
+		}
+
+		if detail.Now != "" {
+			// If it's another group, drill down to find actual node
+			for _, subName := range groupNames {
+				if detail.Now == subName {
+					// Recursively get the actual node
+					subData, subErr := c.Get("/proxies/" + detail.Now)
+					if subErr == nil {
+						var subDetail ProxyDetail
+						if json.Unmarshal(subData, &subDetail) == nil && subDetail.Now != "" {
+							return subDetail.Now, nil
+						}
+					}
+				}
+			}
+			return detail.Now, nil
+		}
 	}
 
-	var detail ProxyDetail
-	if err := json.Unmarshal(data, &detail); err != nil {
-		return "", err
-	}
-
-	return detail.Now, nil
+	return "", fmt.Errorf("no active proxy found")
 }
 
 func (c *Client) SwitchProxy(name string) error {
-	return c.Put("/proxies/Auto", map[string]string{"name": name})
+	// Try multiple proxy group names
+	groupNames := []string{"Auto", "自动选择", "GLOBAL", "Proxy", "代理"}
+
+	for _, group := range groupNames {
+		err := c.Put("/proxies/"+group, map[string]string{"name": name})
+		if err == nil {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to switch proxy in any group")
 }
 
 func (c *Client) TestDelay(name string) (int, error) {

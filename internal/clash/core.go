@@ -402,6 +402,9 @@ func buildConfig(nodes []string, proxyPort, apiPort int) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("mixed-port: %d\nallow-lan: true\nmode: rule\nlog-level: info\nexternal-controller: 127.0.0.1:%d\n", proxyPort, apiPort))
 
+	// DNS configuration - use real IP mode to avoid DNS hijacking issues
+	b.WriteString("\ndns:\n  enable: true\n  enhanced-mode: redir-host\n  fake-ip-range: 198.18.0.1/16\n  fake-ip-filter:\n    - '*.lan'\n    - localhost.ptlogin.microsoft.com\n    - '+.srvrecord'\n    - '+.msftncsi.com'\n    - '+.msftconnecttest.com'\n  default-nameserver:\n    - 223.5.5.5\n    - 119.29.29.29\n  nameserver:\n    - https://dns.alidns.com/dns-query\n    - https://doh.pub/dns-query\n  fallback:\n    - https://1.1.1.1/dns-query\n    - https://dns.google/dns-query\n  fallback-filter:\n    geoip: true\n    geoip-code: CN\n")
+
 	names := []string{}
 	realNodes := []string{}
 	for _, n := range nodes {
