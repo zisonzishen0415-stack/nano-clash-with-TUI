@@ -48,5 +48,5 @@ See CLAUDE.md for detailed architecture and data flow.
 ## Key Behaviors
 
 - Single instance: `/tmp/clashtui.pid` lock
-- Auto-modifies `~/.bashrc` and `~/.zshrc` for terminal proxy loading
+- `proxy.sh` created for terminal use (users source manually: `source ~/.config/clashtui/proxy.sh`)
 - Protocol parsing in `internal/clash/core.go:parseNodeConfig()` supports 11+ protocols (see README.md)

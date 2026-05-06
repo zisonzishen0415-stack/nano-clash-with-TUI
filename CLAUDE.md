@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+See also AGENTS.md for compact guidance suitable for other AI assistants.
+
 ## Build Commands
 
 ```bash
@@ -72,6 +74,11 @@ ClashTUI is a terminal UI for managing Clash/mihomo proxy. Uses BubbleTea framew
 3. Nodes tab → `clash.Client.GetAllProxies()` fetches from API, auto-starts sequential delay testing
 4. Proxy switch → `clash.Client.SwitchProxy()` calls PUT /proxies/Auto
 5. System proxy → `proxy.SetSystemProxy()` sets gsettings (GNOME) or kwriteconfig (KDE)
+6. Chrome/Wayland workaround → `proxy.createChromeProxyDesktop()` creates `~/.local/share/applications/chrome-proxy.desktop` (Chrome ignores gsettings on Wayland)
+
+### Proxy Script Behavior
+
+`~/.config/clashtui/proxy.sh` is smart: it checks if mihomo API (port 9090) is reachable before setting env vars. If mihomo isn't running, it clears all proxy env vars instead. Users source this script manually in terminals.
 
 ### Startup Behavior (app.go:New())
 
@@ -112,6 +119,25 @@ Fallback: 1.1.1.1, dns.google (for international resolution)
 }
 ```
 
+## Waybar Integration
+
+`clashtui --status` outputs JSON for Waybar status display:
+
+```json
+{"text":"🟢","tooltip":"Proxy: DIRECT","class":"running"}
+{"text":"🔴","tooltip":"Proxy: stopped","class":"stopped"}
+```
+
+Waybar config example:
+```json
+"custom/clashtui": {
+  "exec": "clashtui --status",
+  "on-click": "clashtui",
+  "on-click-right": "clashtui --toggle",
+  "interval": 5
+}
+```
+
 ## Runtime Requirements
 
 - Go 1.24.0+
@@ -131,3 +157,31 @@ Subscription parsing in `clash/core.go:parseNodeConfig()` handles:
 If network is broken after reboot (gsettings proxy persists but mihomo doesn't run):
 - Run `clashtui --restore-network` to kill stale mihomo and clear proxy settings
 - If DNS still broken, may need: `sudo systemctl restart NetworkManager`
+
+## Single Instance & IPC Architecture
+
+ClashTUI uses **flock + Unix Socket** for robust single-instance control:
+
+**flock (`/tmp/clashtui.pid`):**
+- Kernel-level atomic lock acquired via `syscall.Flock(LOCK_EX|LOCK_NB)`
+- Only one process can hold the lock at any time
+- Lock auto-releases on process exit (even if crashed)
+- Prevents race conditions when multiple processes try to start simultaneously
+
+**Unix Socket (`/tmp/clashtui.sock`):**
+- IPC channel between CLI commands and running TUI/daemon
+- Commands like `--stop`, `--toggle` delegate to running instance via socket
+- Running instance executes operations and returns result
+- Ensures state changes are coordinated by the process holding the lock
+
+**Core mutex:**
+- `Core.mu` protects `Start()`/`Stop()` from concurrent access
+- Prevents socket handler and TUI from conflicting operations
+
+**Command behavior:**
+| Command | TUI running | TUI not running |
+|---------|-------------|-----------------|
+| `--stop` | Socket → TUI executes | Direct operation |
+| `--toggle` | Socket → TUI executes | Direct operation |
+| `--restore-network` | Kill TUI first (emergency) | Direct operation |
+| `--status` | Read mihomo API directly | Same |

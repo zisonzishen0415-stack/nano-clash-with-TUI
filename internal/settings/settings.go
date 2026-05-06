@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,7 @@ func Load() Settings {
 
 	var s Settings
 	if err := json.Unmarshal(data, &s); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: settings.json parse error: %v, using defaults\n", err)
 		return DefaultSettings
 	}
 

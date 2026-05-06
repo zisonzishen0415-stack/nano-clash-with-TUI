@@ -100,8 +100,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tui.MsgProxiesLoaded:
 		cmd := m.nodes.Update(msg)
-		if len(msg) > 0 {
-			m.addLog(fmt.Sprintf("✓ Loaded %d proxies", len(msg)))
+		if len(msg.Proxies) > 0 {
+			m.addLog(fmt.Sprintf("✓ Loaded %d proxies", len(msg.Proxies)))
 		}
 		return m, cmd
 

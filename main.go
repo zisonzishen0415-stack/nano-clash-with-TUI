@@ -66,6 +66,7 @@ func getProxyPort() int {
 }
 
 func printStatus() {
+	// Status is read-only, no need to check for running instance
 	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
 
@@ -101,9 +102,9 @@ func runDaemon() {
 	defer cleanupOnExit()
 
 	s := settings.Load()
+	core := clash.NewCore()
 
 	if config.Exists() {
-		core := clash.NewCore()
 		if !core.IsInstalled() {
 			core.Install()
 			core.DownloadGeoData()
@@ -113,6 +114,11 @@ func runDaemon() {
 			proxy.SetSystemProxy(s.ProxyPort)
 		}
 	}
+
+	// Handle socket commands in background
+	go singleinstance.HandleSocketCommands(func(cmd string) string {
+		return handleCommand(cmd, core)
+	})
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -132,10 +138,17 @@ func runTUI() {
 	defer singleinstance.Release()
 
 	client := clash.NewClient(getAPIPort())
+	core := clash.NewCore()
+
+	// Clear stale state if mihomo not running
 	if !client.IsConnected() {
-		core := clash.NewCore()
 		core.Stop()
 	}
+
+	// Handle socket commands in background (TUI also handles IPC)
+	go singleinstance.HandleSocketCommands(func(cmd string) string {
+		return handleCommand(cmd, core)
+	})
 
 	p := tea.NewProgram(
 		app.New(),
@@ -157,19 +170,77 @@ func runTUI() {
 	}
 }
 
-func stopAll() {
-	daemonPid, err := singleinstance.ReadPID()
-	if err == nil && daemonPid > 0 {
-		process, _ := os.FindProcess(daemonPid)
-		process.Signal(syscall.SIGTERM)
-		for i := 0; i < 10; i++ {
-			if process.Signal(syscall.Signal(0)) != nil {
-				break
+// handleCommand handles IPC commands from socket
+// This runs in the TUI/daemon process
+func handleCommand(cmd string, core *clash.Core) string {
+	s := settings.Load()
+
+	switch cmd {
+	case "stop":
+		core.Stop()
+		proxy.UnsetSystemProxy()
+		return "ok: stopped"
+
+	case "toggle":
+		client := clash.NewClient(s.APIPort)
+		if client.IsConnected() {
+			core.Stop()
+			proxy.UnsetSystemProxy()
+			return "ok: stopped"
+		} else {
+			if !config.Exists() {
+				return "error: no config"
 			}
-			time.Sleep(100 * time.Millisecond)
+			if !core.IsInstalled() {
+				core.Install()
+				core.DownloadGeoData()
+			}
+			core.Start()
+			if s.SystemProxy {
+				proxy.SetSystemProxy(s.ProxyPort)
+			}
+			return "ok: started"
+		}
+
+	case "restore-network":
+		core.Stop()
+		proxy.UnsetSystemProxy()
+		return "ok: network restored"
+
+	case "status":
+		client := clash.NewClient(s.APIPort)
+		if client.IsConnected() {
+			current, _ := client.GetCurrentProxy()
+			return "running: " + current
+		}
+		return "stopped"
+
+	default:
+		return "error: unknown command"
+	}
+}
+
+// stopAll stops mihomo and clears proxy
+// If TUI/daemon is running, delegate via socket; otherwise operate directly
+func stopAll() {
+	// Check if TUI/daemon is running via socket
+	if singleinstance.IsRunning() {
+		resp, err := singleinstance.SendCommand("stop")
+		if err == nil {
+			fmt.Println(resp)
+			fmt.Println("Terminal: source ~/.config/clashtui/proxy.sh")
+			return
+		}
+		// Socket failed but instance might be running - send signal
+		pid, err := singleinstance.ReadPID()
+		if err == nil && pid > 0 {
+			process, _ := os.FindProcess(pid)
+			process.Signal(syscall.SIGTERM)
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
+	// No running instance - operate directly
 	core := clash.NewCore()
 	core.Stop()
 	proxy.UnsetSystemProxy()
@@ -177,9 +248,18 @@ func stopAll() {
 	fmt.Println("Terminal: source ~/.config/clashtui/proxy.sh")
 }
 
-// restoreNetwork forcefully clears all proxy settings to recover network access
-// Use this when network is broken after reboot and you can't access anything
+// restoreNetwork forcefully clears all proxy settings
+// This is an emergency command, always operate directly (even if TUI running)
 func restoreNetwork() {
+	// Emergency: force clear, don't wait for socket response
+	// Kill TUI/daemon first if running
+	pid, err := singleinstance.ReadPID()
+	if err == nil && pid > 0 {
+		process, _ := os.FindProcess(pid)
+		process.Signal(syscall.SIGTERM)
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	// Kill any lingering mihomo process
 	core := clash.NewCore()
 	core.Stop()
@@ -200,13 +280,28 @@ func restoreNetwork() {
 	fmt.Println("  sudo systemctl restart systemd-resolved")
 }
 
+// toggleProxy toggles proxy on/off
+// If TUI/daemon is running, delegate via socket; otherwise operate directly
 func toggleProxy() {
+	// Check if TUI/daemon is running via socket
+	if singleinstance.IsRunning() {
+		resp, err := singleinstance.SendCommand("toggle")
+		if err == nil {
+			fmt.Println(resp)
+			return
+		}
+	}
+
+	// No running instance - operate directly
 	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
 	s := settings.Load()
 
 	if connected {
-		stopAll()
+		core := clash.NewCore()
+		core.Stop()
+		proxy.UnsetSystemProxy()
+		fmt.Println("Stopped")
 	} else {
 		if !config.Exists() {
 			fmt.Println("No config, run TUI first")

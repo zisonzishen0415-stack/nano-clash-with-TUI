@@ -25,7 +25,10 @@ type NodesModel struct {
 	testQueue      []string
 }
 
-type MsgProxiesLoaded []clash.ProxyInfo
+type MsgProxiesLoaded struct {
+	Proxies []clash.ProxyInfo
+	Current string
+}
 type MsgProxySwitched string
 type MsgDelayTested struct {
 	Name  string
@@ -67,7 +70,8 @@ func (m NodesModel) Init() tea.Cmd {
 func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case MsgProxiesLoaded:
-		m.proxies = msg
+		m.proxies = msg.Proxies
+		m.current = msg.Current
 		m.loading = false
 		m.retries = 0
 		sort.Slice(m.proxies, func(i, j int) bool {
@@ -313,8 +317,7 @@ func (m NodesModel) loadProxies() tea.Msg {
 		return MsgRetryLoad{}
 	}
 	current, _ := m.client.GetCurrentProxy()
-	m.current = current
-	return MsgProxiesLoaded(proxies)
+	return MsgProxiesLoaded{Proxies: proxies, Current: current}
 }
 
 func (m NodesModel) testDelayByName(name string) tea.Cmd {

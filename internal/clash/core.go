@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"clashtui/internal/config"
@@ -109,10 +110,10 @@ func parseSubscriptionInfo(urlStr string, headers http.Header) SubscriptionInfo 
 	return info
 }
 
-type Core struct{}
-
-// Global process tracking to prevent zombies
-var runningCmd *exec.Cmd
+type Core struct {
+	runningCmd *exec.Cmd
+	mu         sync.Mutex
+}
 
 const clashPidFile = "clash.pid"
 
@@ -183,8 +184,11 @@ func (c *Core) DownloadGeoData() error {
 }
 
 func (c *Core) Start() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// Kill any existing process first
-	c.Stop()
+	c.stopInternal()
 
 	cmd := exec.Command(config.CoreBinaryPath(), "-d", config.GetBaseDir())
 	cmd.Stdout = nil
@@ -195,7 +199,7 @@ func (c *Core) Start() error {
 	}
 
 	// Save cmd for proper cleanup within same process
-	runningCmd = cmd
+	c.runningCmd = cmd
 
 	// Save PID to file for cross-process tracking
 	saveClashPid(cmd.Process.Pid)
@@ -204,11 +208,18 @@ func (c *Core) Start() error {
 }
 
 func (c *Core) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopInternal()
+}
+
+// stopInternal is the unlocked version, called by Start and Stop
+func (c *Core) stopInternal() error {
 	// Method 1: Kill tracked process in same process instance
-	if runningCmd != nil && runningCmd.Process != nil {
-		runningCmd.Process.Kill()
-		runningCmd.Process.Wait() // Reap the zombie (only works for child)
-		runningCmd = nil
+	if c.runningCmd != nil && c.runningCmd.Process != nil {
+		c.runningCmd.Process.Kill()
+		c.runningCmd.Process.Wait() // Reap the zombie
+		c.runningCmd = nil
 		clearClashPid()
 		return nil
 	}
@@ -218,11 +229,12 @@ func (c *Core) Stop() error {
 	if err == nil && pid > 0 {
 		process, _ := os.FindProcess(pid)
 		process.Kill()
+		process.Wait() // Reap the zombie
 		clearClashPid()
+		return nil
 	}
 
-	// Method 3: Fallback - kill by process name (backup cleanup)
-	exec.Command("pkill", "-f", "mihomo").Run()
+	// Method 3: Fallback - kill by process name with config path (more specific)
 	exec.Command("pkill", "-f", "clash -d "+config.GetBaseDir()).Run()
 	time.Sleep(200 * time.Millisecond)
 
@@ -233,6 +245,10 @@ func downloadFile(url, dst string) error {
 	resp, err := http.Get(url)
 	if err != nil { return err }
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download failed: status %d", resp.StatusCode)
+	}
 
 	out, err := os.Create(dst)
 	if err != nil { return err }
