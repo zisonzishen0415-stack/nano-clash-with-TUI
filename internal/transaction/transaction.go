@@ -9,13 +9,13 @@ import (
 )
 
 type Transaction struct {
-	name          string
-	prepareFn     func() (backupPath string, err error)
-	commitFn      func() error
-	verifyFn      func() error
-	rollbackFn    func(backupPath string) error
-	backupPath    string
-	logger        *log.Logger
+	name       string
+	prepareFn  func() (backupPath string, err error)
+	commitFn   func() error
+	verifyFn   func() error
+	rollbackFn func(backupPath string) error
+	backupPath string
+	logger     *log.Logger
 }
 
 func NewTransaction(name string) *Transaction {
@@ -104,7 +104,7 @@ func ConfigTransaction(configPath string, operation string, commitFn func() erro
 		}).
 		Commit(commitFn).
 		Verify(func() error {
-			data, err := os.ReadFile(configPath)
+			_, err := os.ReadFile(configPath)
 			if err != nil {
 				return err
 			}

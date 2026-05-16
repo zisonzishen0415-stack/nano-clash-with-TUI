@@ -4,51 +4,51 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	TabActive = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
-		Background(lipgloss.Color("#1F2937")).
-		Padding(0, 1)
+			Bold(true).
+			Foreground(lipgloss.Color("#7C3AED")).
+			Background(lipgloss.Color("#1F2937")).
+			Padding(0, 1)
 
 	TabInactive = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
-		Padding(0, 1)
+			Foreground(lipgloss.Color("#6B7280")).
+			Padding(0, 1)
 
 	StatusOK = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#10B981"))
+			Foreground(lipgloss.Color("#10B981"))
 
 	StatusErr = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444"))
+			Foreground(lipgloss.Color("#EF4444"))
 
 	Help = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#9CA3AF"))
 
 	DelayGreen = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#10B981"))
+			Foreground(lipgloss.Color("#10B981"))
 
 	DelayYellow = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FBBF24"))
+			Foreground(lipgloss.Color("#FBBF24"))
 
 	DelayRed = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444"))
+			Foreground(lipgloss.Color("#EF4444"))
 
 	DelayGray = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+			Foreground(lipgloss.Color("#6B7280"))
 
 	SubActive = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#10B981"))
+			Foreground(lipgloss.Color("#10B981"))
 
 	SubInactive = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+			Foreground(lipgloss.Color("#6B7280"))
 
 	SubHighlight = lipgloss.NewStyle().
-		Bold(true)
+			Bold(true)
 
 	// 日志渐变颜色：最新最亮，越旧越灰
-	LogBright = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))  // 第1条（最新）
-	LogMedium = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))  // 第2条
-	LogDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))  // 第3条
-	LogFaint  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))  // 第4条
-	LogFade   = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))  // 第5条（最旧）
+	LogBright = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")) // 第1条（最新）
+	LogMedium = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")) // 第2条
+	LogDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")) // 第3条
+	LogFaint  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563")) // 第4条
+	LogFade   = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")) // 第5条（最旧）
 )
 
 func DelayStyle(delay int) lipgloss.Style {

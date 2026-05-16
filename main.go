@@ -14,7 +14,6 @@ import (
 	"clashtui/internal/app"
 	"clashtui/internal/clash"
 	"clashtui/internal/config"
-	"clashtui/internal/proxy"
 	"clashtui/internal/settings"
 	"clashtui/internal/singleinstance"
 )
@@ -105,7 +104,6 @@ func runDaemon() {
 	defer singleinstance.Release()
 	defer cleanupOnExit()
 
-	s := settings.Load()
 	core := clash.NewCore()
 
 	if config.Exists() {
@@ -117,15 +115,21 @@ func runDaemon() {
 			}
 			core.DownloadGeoData()
 		}
-		
+
+		// Process config for TUN mode if enabled
+		s := settings.Load()
+		if s.TUNMode {
+			data, err := config.LoadConfigNoValidation()
+			if err == nil {
+				newData := clash.ProcessConfigForTUN(data, true)
+				config.SaveConfig(newData)
+			}
+		}
+
 		if err := core.Start(); err != nil {
 			fmt.Fprintln(os.Stderr, "Error starting core:", err)
 			fmt.Fprintln(os.Stderr, "  Suggestion: Run 'clashtui --restore-network' to fix network")
 			os.Exit(1)
-		}
-		
-		if s.SystemProxy {
-			proxy.SetSystemProxy(s.ProxyPort)
 		}
 	}
 
@@ -160,30 +164,24 @@ func runTUI() {
 
 	client := clash.NewClient(getAPIPort())
 	if client.IsConnected() {
-		fmt.Println("\n  ✓ Exited - core running")
-		fmt.Println("  Run 'clashtui --env' to see proxy env vars")
+		fmt.Println("\n  ✓ Exited - core running (TUN mode)")
 	} else {
 		fmt.Println("\n  ✓ Exited - core stopped")
-		fmt.Println("  Run in shell: unset HTTP_PROXY HTTPS_PROXY ALL_PROXY")
 	}
 }
 
-// handleCommand handles IPC commands from socket
-// This runs in the TUI/daemon process
 func handleCommand(cmd string, core *clash.Core) string {
 	s := settings.Load()
 
 	switch cmd {
 	case "stop":
 		core.Stop()
-		proxy.UnsetSystemProxy()
 		return "ok: stopped"
 
 	case "toggle":
 		client := clash.NewClient(s.APIPort)
 		if client.IsConnected() {
 			core.Stop()
-			proxy.UnsetSystemProxy()
 			return "ok: stopped"
 		} else {
 			if !config.Exists() {
@@ -194,15 +192,11 @@ func handleCommand(cmd string, core *clash.Core) string {
 				core.DownloadGeoData()
 			}
 			core.Start()
-			if s.SystemProxy {
-				proxy.SetSystemProxy(s.ProxyPort)
-			}
 			return "ok: started"
 		}
 
 	case "restore-network":
 		core.Stop()
-		proxy.UnsetSystemProxy()
 		return "ok: network restored"
 
 	case "status":
@@ -223,7 +217,6 @@ func stopAll() {
 		resp, err := singleinstance.SendCommand("stop")
 		if err == nil {
 			fmt.Println(resp)
-			fmt.Println("Terminal: source ~/.config/clashtui/proxy.sh")
 			return
 		}
 		pid, err := singleinstance.ReadPID()
@@ -236,9 +229,7 @@ func stopAll() {
 
 	core := clash.NewCore()
 	core.Stop()
-	proxy.UnsetSystemProxy()
-	fmt.Println("✓ Stopped, proxy cleared")
-	fmt.Println("  Terminal: source ~/.config/clashtui/proxy.sh")
+	fmt.Println("✓ Stopped")
 }
 
 func restoreNetwork() {
@@ -252,11 +243,8 @@ func restoreNetwork() {
 	core := clash.NewCore()
 	core.Stop()
 
-	proxy.UnsetSystemProxy()
-
 	fmt.Println("✓ Network restored!")
-	fmt.Println("✓ Proxy settings cleared")
-	fmt.Println("✓ TUN mode stopped")
+	fmt.Println("✓ Core stopped")
 	fmt.Println("")
 	fmt.Println("If DNS still broken:")
 	fmt.Println("  sudo systemctl restart systemd-resolved")
@@ -265,10 +253,7 @@ func restoreNetwork() {
 	fmt.Println("  Reboot system if network issues persist")
 }
 
-// toggleProxy toggles proxy on/off
-// If TUI/daemon is running, delegate via socket; otherwise operate directly
 func toggleProxy() {
-	// Check if TUI/daemon is running via socket
 	if singleinstance.IsRunning() {
 		resp, err := singleinstance.SendCommand("toggle")
 		if err == nil {
@@ -277,30 +262,33 @@ func toggleProxy() {
 		}
 	}
 
-	// No running instance - operate directly
 	client := clash.NewClient(getAPIPort())
 	connected := client.IsConnected()
-	s := settings.Load()
 
 	if connected {
 		core := clash.NewCore()
 		core.Stop()
-		proxy.UnsetSystemProxy()
 		fmt.Println("Stopped")
 	} else {
 		if !config.Exists() {
 			fmt.Println("No config, run TUI first")
 			os.Exit(1)
 		}
+		s := settings.Load()
 		core := clash.NewCore()
 		if !core.IsInstalled() {
 			core.Install()
 			core.DownloadGeoData()
 		}
-		core.Start()
-		if s.SystemProxy {
-			proxy.SetSystemProxy(s.ProxyPort)
+		// Process config for TUN mode if enabled
+		if s.TUNMode {
+			data, err := config.LoadConfigNoValidation()
+			if err == nil {
+				newData := clash.ProcessConfigForTUN(data, true)
+				config.SaveConfig(newData)
+			}
 		}
+		core.Start()
 		fmt.Println("Started")
 	}
 }
@@ -320,29 +308,29 @@ func testDownload() {
 		return
 	}
 	fmt.Println("Downloading:", sub.URL)
-	
+
 	_, info, err := clash.DownloadSubscription(sub.URL, s.ProxyPort, s.APIPort, s.TUNMode)
 	if err != nil {
 		fmt.Println("❌ Error:", err)
 		return
 	}
-	
+
 	fmt.Println("✅ Download OK")
 	fmt.Println("Traffic:", info.Traffic)
 	fmt.Println("Expiry:", info.Expiry)
-	
+
 	if config.Exists() {
 		data, _ := config.LoadConfig()
 		fmt.Println("Config size:", len(data), "bytes")
 	}
-	
+
 	core := clash.NewCore()
 	if err := core.DownloadGeoData(); err != nil {
 		fmt.Println("❌ GeoData error:", err)
 		return
 	}
 	fmt.Println("✅ GeoData extracted")
-	
+
 	if err := core.StartAndCheck(); err != nil {
 		fmt.Println("❌ Core error:", err)
 		return
@@ -354,5 +342,4 @@ func testDownload() {
 func cleanupOnExit() {
 	core := clash.NewCore()
 	core.Stop()
-	proxy.UnsetSystemProxy()
 }

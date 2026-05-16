@@ -13,9 +13,8 @@ import (
 type NetworkMode string
 
 const (
-	ModeOff        NetworkMode = "off"
-	ModeSystemProxy NetworkMode = "system-proxy"
-	ModeTUN        NetworkMode = "tun"
+	ModeOff NetworkMode = "off"
+	ModeTUN NetworkMode = "tun"
 )
 
 type NetworkState struct {

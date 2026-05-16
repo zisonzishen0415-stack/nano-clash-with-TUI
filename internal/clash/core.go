@@ -180,13 +180,19 @@ func (c *Core) IsInstalled() bool {
 }
 
 func (c *Core) Install() error {
-	if c.IsInstalled() { return nil }
+	if c.IsInstalled() {
+		return nil
+	}
 	config.EnsureCoreDir()
 
 	tmp := filepath.Join(config.GetBaseDir(), "mihomo.gz")
-	if err := downloadFile(getCoreDownloadURL(), tmp); err != nil { return err }
+	if err := downloadFile(getCoreDownloadURL(), tmp); err != nil {
+		return err
+	}
 
-	if err := ungzip(tmp, config.CoreBinaryPath()); err != nil { return err }
+	if err := ungzip(tmp, config.CoreBinaryPath()); err != nil {
+		return err
+	}
 	os.Remove(tmp)
 	os.Chmod(config.CoreBinaryPath(), 0755)
 	return nil
@@ -359,7 +365,9 @@ func (c *Core) stopInternal() error {
 
 func downloadFile(url, dst string) error {
 	resp, err := http.Get(url)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
@@ -367,7 +375,9 @@ func downloadFile(url, dst string) error {
 	}
 
 	out, err := os.Create(dst)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
@@ -376,15 +386,21 @@ func downloadFile(url, dst string) error {
 
 func ungzip(src, dst string) error {
 	f, err := os.Open(src)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 
 	gr, err := gzip.NewReader(f)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer gr.Close()
 
 	out, err := os.Create(dst)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer out.Close()
 
 	_, err = io.Copy(out, gr)
@@ -398,16 +414,22 @@ func DownloadSubscription(subURL string, proxyPort, apiPort int, tunMode bool) (
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest("GET", subURL, nil)
-	if err != nil { return nil, SubscriptionInfo{}, fmt.Errorf("create request: %w", err) }
-	
+	if err != nil {
+		return nil, SubscriptionInfo{}, fmt.Errorf("create request: %w", err)
+	}
+
 	req.Header.Set("User-Agent", "ClashforWindows/0.20.39")
 	req.Header.Set("Accept", "*/*")
 
 	resp, err := client.Do(req)
-	if err != nil { return nil, SubscriptionInfo{}, fmt.Errorf("fetch: %w", err) }
+	if err != nil {
+		return nil, SubscriptionInfo{}, fmt.Errorf("fetch: %w", err)
+	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 { return nil, SubscriptionInfo{}, fmt.Errorf("status: %d", resp.StatusCode) }
+	if resp.StatusCode != 200 {
+		return nil, SubscriptionInfo{}, fmt.Errorf("status: %d", resp.StatusCode)
+	}
 
 	data, _ := io.ReadAll(resp.Body)
 	s := strings.TrimSpace(string(data))
@@ -430,7 +452,9 @@ func DownloadSubscription(subURL string, proxyPort, apiPort int, tunMode bool) (
 		return nil, info, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	if err := config.SaveConfig(configData); err != nil { return nil, SubscriptionInfo{}, err }
+	if err := config.SaveConfig(configData); err != nil {
+		return nil, SubscriptionInfo{}, err
+	}
 	return data, info, nil
 }
 
@@ -738,23 +762,37 @@ func parseNodeConfig(link string) string {
 	if strings.HasPrefix(link, "trojan://") {
 		link = strings.TrimPrefix(link, "trojan://")
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		pass := p[0]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		sni := host
 		skip := false
 		grpc := false
 		if strings.Contains(p[1], "?") {
 			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
-			if q.Get("sni") != "" { sni = q.Get("sni") }
-			if q.Get("peer") != "" { sni = q.Get("peer") }
-			if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" { skip = true }
-			if q.Get("type") == "grpc" { grpc = true }
+			if q.Get("sni") != "" {
+				sni = q.Get("sni")
+			}
+			if q.Get("peer") != "" {
+				sni = q.Get("peer")
+			}
+			if q.Get("allowInsecure") == "1" || q.Get("insecure") == "1" {
+				skip = true
+			}
+			if q.Get("type") == "grpc" {
+				grpc = true
+			}
 		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: trojan\n    server: %s\n    port: %s\n    password: %s\n    sni: %s\n", name, host, port, pass, sni)
-		if skip { r += "    skip-cert-verify: true\n" }
+		if skip {
+			r += "    skip-cert-verify: true\n"
+		}
 		if grpc {
 			r += "    network: grpc\n"
 			if serviceName := ""; serviceName != "" {
@@ -767,32 +805,48 @@ func parseNodeConfig(link string) string {
 	if strings.HasPrefix(link, "vless://") {
 		link = strings.TrimPrefix(link, "vless://")
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		uuid := p[0]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		sni := host
 		net := "tcp"
 		skip := false
 		if strings.Contains(p[1], "?") {
 			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
-			if q.Get("sni") != "" { sni = q.Get("sni") }
-			if q.Get("type") != "" { net = q.Get("type") }
-			if q.Get("allowInsecure") == "1" { skip = true }
+			if q.Get("sni") != "" {
+				sni = q.Get("sni")
+			}
+			if q.Get("type") != "" {
+				net = q.Get("type")
+			}
+			if q.Get("allowInsecure") == "1" {
+				skip = true
+			}
 		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: vless\n    server: %s\n    port: %s\n    uuid: %s\n    network: %s\n    tls: true\n    servername: %s\n", name, host, port, uuid, net, sni)
-		if skip { r += "    skip-cert-verify: true\n" }
+		if skip {
+			r += "    skip-cert-verify: true\n"
+		}
 		return r
 	}
 
 	if strings.HasPrefix(link, "anytls://") {
 		link = strings.TrimPrefix(link, "anytls://")
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		uuid := p[0]
 		hp := strings.SplitN(strings.TrimSuffix(strings.SplitN(p[1], "?", 2)[0], "/"), ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		sni := host
 		net := "tcp"
@@ -800,14 +854,26 @@ func parseNodeConfig(link string) string {
 		skip := false
 		if strings.Contains(p[1], "?") {
 			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
-			if q.Get("sni") != "" { sni = q.Get("sni") }
-			if q.Get("type") != "" { net = q.Get("type") }
-			if q.Get("fp") != "" { fp = q.Get("fp") }
-			if q.Get("insecure") == "1" { skip = true }
+			if q.Get("sni") != "" {
+				sni = q.Get("sni")
+			}
+			if q.Get("type") != "" {
+				net = q.Get("type")
+			}
+			if q.Get("fp") != "" {
+				fp = q.Get("fp")
+			}
+			if q.Get("insecure") == "1" {
+				skip = true
+			}
 		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: vless\n    server: %s\n    port: %s\n    uuid: %s\n    network: %s\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    servername: %s\n", name, host, port, uuid, net, sni)
-		if fp != "" { r += fmt.Sprintf("    client-fingerprint: %s\n", fp) }
-		if skip { r += "    skip-cert-verify: true\n" }
+		if fp != "" {
+			r += fmt.Sprintf("    client-fingerprint: %s\n", fp)
+		}
+		if skip {
+			r += "    skip-cert-verify: true\n"
+		}
 		return r
 	}
 
@@ -815,23 +881,37 @@ func parseNodeConfig(link string) string {
 		link = strings.TrimPrefix(link, "hysteria2://")
 		link = strings.TrimPrefix(link, "hy2://")
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		pass := p[0]
 		hp := strings.SplitN(strings.TrimSuffix(strings.SplitN(p[1], "?", 2)[0], "/"), ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		sni := host
 		skip := false
 		var ports string
 		if strings.Contains(p[1], "?") {
 			q, _ := url.ParseQuery(strings.SplitN(p[1], "?", 2)[1])
-			if q.Get("sni") != "" { sni = q.Get("sni") }
-			if q.Get("insecure") == "1" { skip = true }
-			if q.Get("mport") != "" { ports = q.Get("mport") }
+			if q.Get("sni") != "" {
+				sni = q.Get("sni")
+			}
+			if q.Get("insecure") == "1" {
+				skip = true
+			}
+			if q.Get("mport") != "" {
+				ports = q.Get("mport")
+			}
 		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: hysteria2\n    server: %s\n    port: %s\n    password: %s\n    sni: %s\n", name, host, port, pass, sni)
-		if ports != "" { r += fmt.Sprintf("    ports: %s\n", ports) }
-		if skip { r += "    skip-cert-verify: true\n" }
+		if ports != "" {
+			r += fmt.Sprintf("    ports: %s\n", ports)
+		}
+		if skip {
+			r += "    skip-cert-verify: true\n"
+		}
 		return r
 	}
 
@@ -840,15 +920,21 @@ func parseNodeConfig(link string) string {
 		decoded, err := base64.StdEncoding.DecodeString(link)
 		if err != nil {
 			decoded, err = base64.RawStdEncoding.DecodeString(link)
-			if err != nil { return "" }
+			if err != nil {
+				return ""
+			}
 		}
 		var vm map[string]interface{}
-		if err := json.Unmarshal(decoded, &vm); err != nil { return "" }
+		if err := json.Unmarshal(decoded, &vm); err != nil {
+			return ""
+		}
 		server, _ := vm["add"].(string)
 		port, _ := vm["port"].(string)
 		uuid, _ := vm["id"].(string)
 		net, _ := vm["net"].(string)
-		if net == "" { net = "tcp" }
+		if net == "" {
+			net = "tcp"
+		}
 		tls, _ := vm["tls"].(string)
 		hostHeader, _ := vm["host"].(string)
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: vmess\n    server: %s\n    port: %s\n    uuid: %s\n    network: %s\n", name, server, port, uuid, net)
@@ -866,35 +952,45 @@ func parseNodeConfig(link string) string {
 		if strings.Contains(link, "#") {
 			link = strings.SplitN(link, "#", 2)[0]
 		}
-		
+
 		if strings.Contains(link, "@") {
 			p := strings.SplitN(link, "@", 2)
-			if len(p) != 2 { return "" }
-			
+			if len(p) != 2 {
+				return ""
+			}
+
 			methodPass := p[0]
 			hostPort := p[1]
-			
+
 			var method, pass string
 			d, err := base64.StdEncoding.DecodeString(methodPass)
 			if err != nil {
 				d, err = base64.RawStdEncoding.DecodeString(methodPass)
 				if err != nil {
 					mp := strings.SplitN(methodPass, ":", 2)
-					if len(mp) != 2 { return "" }
+					if len(mp) != 2 {
+						return ""
+					}
 					method, pass = mp[0], mp[1]
 				} else {
 					mp := strings.SplitN(string(d), ":", 2)
-					if len(mp) != 2 { return "" }
+					if len(mp) != 2 {
+						return ""
+					}
 					method, pass = mp[0], mp[1]
 				}
 			} else {
 				mp := strings.SplitN(string(d), ":", 2)
-				if len(mp) != 2 { return "" }
+				if len(mp) != 2 {
+					return ""
+				}
 				method, pass = mp[0], mp[1]
 			}
-			
+
 			hp := strings.SplitN(hostPort, ":", 2)
-			if len(hp) != 2 { return "" }
+			if len(hp) != 2 {
+				return ""
+			}
 			return fmt.Sprintf("  - name: \"%s\"\n    type: ss\n    server: %s\n    port: %s\n    cipher: %s\n    password: %s\n", name, hp[0], hp[1], method, pass)
 		}
 		return ""
@@ -906,10 +1002,14 @@ func parseNodeConfig(link string) string {
 			link = strings.SplitN(link, "#", 2)[0]
 		}
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		pass := p[0]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		return fmt.Sprintf("  - name: \"%s\"\n    type: hysteria\n    server: %s\n    port: %s\n    auth_str: %s\n", name, host, port, pass)
 	}
@@ -920,18 +1020,26 @@ func parseNodeConfig(link string) string {
 		decoded, err := base64.StdEncoding.DecodeString(link)
 		if err != nil {
 			decoded, err = base64.RawStdEncoding.DecodeString(link)
-			if err != nil { decoded = []byte(link) }
+			if err != nil {
+				decoded = []byte(link)
+			}
 		}
 		// SSR format: server:port:protocol:method:obfs:password_base64/?obfsparam=...&protoparam=...&remarks=...
 		parts := strings.Split(string(decoded), "/?")
-		if len(parts) < 1 { return "" }
+		if len(parts) < 1 {
+			return ""
+		}
 		mainParts := strings.Split(parts[0], ":")
-		if len(mainParts) < 6 { return "" }
+		if len(mainParts) < 6 {
+			return ""
+		}
 		host, port, protocol, method, obfs := mainParts[0], mainParts[1], mainParts[2], mainParts[3], mainParts[4]
 		passDecoded, err := base64.StdEncoding.DecodeString(mainParts[5])
 		if err != nil {
 			passDecoded, err = base64.RawStdEncoding.DecodeString(mainParts[5])
-			if err != nil { passDecoded = []byte(mainParts[5]) }
+			if err != nil {
+				passDecoded = []byte(mainParts[5])
+			}
 		}
 		password := string(passDecoded)
 		return fmt.Sprintf("  - name: \"%s\"\n    type: ssr\n    server: %s\n    port: %s\n    cipher: %s\n    password: %s\n    protocol: %s\n    obfs: %s\n", name, host, port, method, password, protocol, obfs)
@@ -962,7 +1070,9 @@ func parseNodeConfig(link string) string {
 				host, port = hp[0], hp[1]
 			}
 		}
-		if host == "" || port == "" { return "" }
+		if host == "" || port == "" {
+			return ""
+		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: socks5\n    server: %s\n    port: %s\n", name, host, port)
 		if user != "" {
 			r += fmt.Sprintf("    username: %s\n    password: %s\n", user, pass)
@@ -996,7 +1106,9 @@ func parseNodeConfig(link string) string {
 				host, port = hp[0], hp[1]
 			}
 		}
-		if host == "" || port == "" { return "" }
+		if host == "" || port == "" {
+			return ""
+		}
 		r := fmt.Sprintf("  - name: \"%s\"\n    type: http\n    server: %s\n    port: %s\n", name, host, port)
 		if user != "" {
 			r += fmt.Sprintf("    username: %s\n    password: %s\n", user, pass)
@@ -1015,10 +1127,14 @@ func parseNodeConfig(link string) string {
 		}
 		// Format: privateKey@host:port?publicKey=...&reserved=...
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		privateKey := p[0]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		var publicKey, reserved string
 		if strings.Contains(p[1], "?") {
@@ -1044,12 +1160,18 @@ func parseNodeConfig(link string) string {
 		}
 		// Format: uuid:password@host:port?congestion_control=...&alpn=...
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		up := strings.SplitN(p[0], ":", 2)
-		if len(up) != 2 { return "" }
+		if len(up) != 2 {
+			return ""
+		}
 		uuid, password := up[0], up[1]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		var cc, alpn string
 		if strings.Contains(p[1], "?") {
@@ -1075,10 +1197,14 @@ func parseNodeConfig(link string) string {
 		}
 		// Format: user@host:port?privateKey=...
 		p := strings.SplitN(link, "@", 2)
-		if len(p) != 2 { return "" }
+		if len(p) != 2 {
+			return ""
+		}
 		user := p[0]
 		hp := strings.SplitN(strings.SplitN(p[1], "?", 2)[0], ":", 2)
-		if len(hp) != 2 { return "" }
+		if len(hp) != 2 {
+			return ""
+		}
 		host, port := hp[0], hp[1]
 		var privateKey string
 		if strings.Contains(p[1], "?") {

@@ -57,17 +57,17 @@ func NewWarningError(message string) ClassifiedError {
 
 func (e ClassifiedError) FullMessage() string {
 	var parts []string
-	
+
 	parts = append(parts, e.Message)
-	
+
 	if e.Context != "" {
 		parts = append(parts, "  Context: "+e.Context)
 	}
-	
+
 	if e.Recovery != "" {
 		parts = append(parts, "  Recovery: "+e.Recovery)
 	}
-	
+
 	return strings.Join(parts, "\n")
 }
 
@@ -126,22 +126,22 @@ func NetworkBrokenError() ClassifiedError {
 
 func PreserveErrorContext(err error, stderrFile string) ClassifiedError {
 	baseMsg := err.Error()
-	
+
 	if strings.Contains(baseMsg, "validation") {
 		return ConfigValidationError(err)
 	}
-	
+
 	if strings.Contains(baseMsg, "capability") || strings.Contains(baseMsg, "TUN") {
 		return TUNCapabilityError(stderrFile)
 	}
-	
+
 	if strings.Contains(baseMsg, "status") || strings.Contains(baseMsg, "download") {
 		return SubscriptionDownloadError(0, "")
 	}
-	
+
 	if strings.Contains(baseMsg, "core") || strings.Contains(baseMsg, "API port") {
 		return CoreStartError(err, stderrFile)
 	}
-	
+
 	return NewOperationalError(baseMsg, "", "Stop core (x) and try restart, or run --restore-network")
 }

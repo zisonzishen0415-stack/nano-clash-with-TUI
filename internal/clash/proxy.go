@@ -8,10 +8,10 @@ import (
 )
 
 type ProxyInfo struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Alive  bool   `json:"alive"`
-	Delay  int    `json:"delay"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Alive bool   `json:"alive"`
+	Delay int    `json:"delay"`
 }
 
 type ProxiesResponse struct {
@@ -19,11 +19,11 @@ type ProxiesResponse struct {
 }
 
 type ProxyDetail struct {
-	Name    string        `json:"name"`
-	Type    string        `json:"type"`
-	Alive   bool          `json:"alive"`
-	Now     string        `json:"now"`
-	All     []string      `json:"all"`
+	Name    string         `json:"name"`
+	Type    string         `json:"type"`
+	Alive   bool           `json:"alive"`
+	Now     string         `json:"now"`
+	All     []string       `json:"all"`
 	History []DelayHistory `json:"history"`
 }
 
@@ -125,7 +125,7 @@ func (c *Client) SwitchProxy(name string) error {
 
 func (c *Client) TestDelay(name string) (int, error) {
 	encodedName := url.PathEscape(name)
-	apiURL := fmt.Sprintf("/proxies/%s/delay?timeout=5000&url=http://www.gstatic.com/generate_204", encodedName)
+	apiURL := fmt.Sprintf("/proxies/%s/delay?timeout=10000&url=https://cp.cloudflare.com", encodedName)
 	data, err := c.Get(apiURL)
 	if err != nil {
 		return 0, err

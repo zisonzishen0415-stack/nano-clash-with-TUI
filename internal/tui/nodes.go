@@ -174,7 +174,9 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 			return tea.Sequence(
-				func() tea.Msg { return MsgTestProgress{Index: len(m.proxies) - len(m.testQueue), Total: len(m.proxies)} },
+				func() tea.Msg {
+					return MsgTestProgress{Index: len(m.proxies) - len(m.testQueue), Total: len(m.proxies)}
+				},
 				m.testDelayByName(nextName),
 			)
 		}
@@ -191,7 +193,6 @@ func (m *NodesModel) Update(msg tea.Msg) tea.Cmd {
 		return func() tea.Msg {
 			return MsgLogLine(fmt.Sprintf("✓ Tested %d/%d nodes, sorted by speed", successCount, len(m.proxies)))
 		}
-
 
 	case MsgRefresh:
 		m.proxies = nil
