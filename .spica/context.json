@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Nodes     Config    [Logs]"
+  },
+  {
+    "role": "assistant",
+    "content": "I see what looks like a UI header or navigation tabs. Could you clarify what you'd like me to help with? Are you:\n\n1. Looking to build a UI with these tabs?\n2. Debugging an existing application?\n3. Something else?\n\nPlease share more context about your project or what you're trying to accomplish."
+  }
+]
